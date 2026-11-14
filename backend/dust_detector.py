@@ -4,11 +4,12 @@ Implements illumination-invariant reference comparison, SSIM analysis,
 texture blur/diffusion tracking, and HSV saturation shift analysis.
 """
 
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, List
 import cv2
 import numpy as np
 from backend.config import Config
 from backend.utils import logger
+from backend.model_trainer import model_trainer
 
 
 class DustDetector:
@@ -225,8 +226,28 @@ class DustDetector:
         else:
             sat_loss = 0.0
 
-        # 10. Multi-Metric Soiling Indicator Fusion
-        # Balanced weighting:
+        # 10. Active PV Cell Localization & Foreign Debris Detection
+        cells_live, cell_roi = model_trainer.extract_panel_cell_region(live_frame)
+        if cells_live is not None and cells_live.size > 0:
+            n_blobs, debris_area, cov_pct, raw_boxes = model_trainer.detect_debris_blobs(cells_live)
+            frame_boxes = [
+                {
+                    "x": int(b["x"] + cell_roi[0]),
+                    "y": int(b["y"] + cell_roi[1]),
+                    "w": int(b["w"]),
+                    "h": int(b["h"]),
+                    "area": b["area"]
+                }
+                for b in raw_boxes
+            ]
+            soiling_debris = model_trainer.compute_soiling_index(cov_pct, n_blobs)
+        else:
+            n_blobs, debris_area, cov_pct, frame_boxes = 0, 0.0, 0.0, []
+            soiling_debris = 0.0
+            cell_roi = roi_pixels
+
+        # 11. Multi-Metric Soiling Indicator Fusion
+        # Balanced weighting for reference metrics:
         # - Structural Loss: 40%
         # - Texture/Blur Loss: 30%
         # - Saturation Loss: 20%
@@ -242,11 +263,28 @@ class DustDetector:
             w_sat * sat_loss +
             w_contrast * contrast_loss
         )
+        raw_ref_index = composite_score * 125.0
 
-        # Calibrated Visual Soiling Index scaling (0.0 to 100.0%)
-        # Sigmoid-calibrated response curve to provide realistic 0-100% telemetry
-        raw_index = composite_score * 125.0
-        soiling_index = float(np.clip(raw_index, 0.0, 100.0))
+        # Optical degradation indicative of diffuse dust / film / haze:
+        diffuse_dust = float(texture_loss * 0.50 + contrast_loss * 0.30 + sat_loss * 0.20)
+        has_heavy_diffuse_dust = (texture_loss > 0.35 and contrast_loss > 0.30) or diffuse_dust > 0.45
+
+        # Hybrid Fusion: Debris blob analysis calibrated on Chittoria Solar panels
+        # combined with illumination-invariant reference metrics
+        if n_blobs >= 6 or cov_pct >= 0.6:
+            # Clear foreign debris/dirt detected: primary trigger
+            soiling_index = max(soiling_debris, 0.75 * soiling_debris + 0.25 * raw_ref_index)
+        elif has_heavy_diffuse_dust:
+            # Diffuse dust layer/haze detected optically (blur, contrast loss, desaturation)
+            soiling_index = max(raw_ref_index, diffuse_dust * 100.0)
+        elif n_blobs <= 2 and cov_pct <= 0.25:
+            # Clean panel: prevent mobile camera angle/perspective shifts from causing false alerts
+            soiling_index = min(soiling_debris + diffuse_dust * 15.0, self.threshold_clean - 1.0)
+        else:
+            # Moderate debris or diffuse surface haze
+            soiling_index = 0.65 * soiling_debris + 0.35 * raw_ref_index
+
+        soiling_index = float(np.clip(soiling_index, 0.0, 100.0))
 
         # Night/Extreme Darkness Guard:
         # If lighting is severely dark, clamp soiling index to prevent false dust triggers
@@ -254,11 +292,15 @@ class DustDetector:
             soiling_index = 0.0
             confidence = 35.0
         else:
-            # Confidence estimation: high when metrics agree and illumination is stable
+            # Confidence estimation: high when debris and optical features are unambiguous
             agreement = 1.0 - np.std([structural_loss, texture_loss, sat_loss, contrast_loss])
-            confidence = float(np.clip(agreement * 100.0, 45.0, 98.0))
+            base_conf = float(np.clip(agreement * 100.0, 50.0, 95.0))
+            if (n_blobs <= 1 and soiling_index < self.threshold_clean) or (n_blobs >= 8 and soiling_index >= self.threshold_heavy):
+                confidence = max(base_conf, 96.0)
+            else:
+                confidence = base_conf
 
-        # 11. Condition Classification
+        # 12. Condition Classification
         if soiling_index < self.threshold_clean:
             status = "CLEAN"
         elif soiling_index < self.threshold_heavy:
@@ -271,14 +313,19 @@ class DustDetector:
             "soiling_index": round(soiling_index, 2),
             "confidence": round(confidence, 1),
             "is_dark": is_dark,
+            "debris_count": n_blobs,
+            "debris_area": debris_area,
+            "debris_coverage": cov_pct,
+            "debris_boxes": frame_boxes,
             "metrics": {
                 "ssim": round(ssim_val, 4),
                 "structural_loss": round(float(structural_loss), 4),
                 "texture_loss": round(float(texture_loss), 4),
                 "contrast_loss": round(float(contrast_loss), 4),
-                "sat_loss": round(float(sat_loss), 4)
+                "sat_loss": round(float(sat_loss), 4),
+                "debris_soiling": round(float(soiling_debris), 2)
             },
-            "roi_coords": roi_pixels
+            "roi_coords": cell_roi if cell_roi else roi_pixels
         }
 
 

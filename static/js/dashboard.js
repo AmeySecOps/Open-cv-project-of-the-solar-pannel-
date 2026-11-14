@@ -18,6 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initUIEventListeners();
   fetchInitialConfig();
   fetchCameraDevices();
+  fetchNetworkDiagnostics();
   fetchReferenceImage();
   fetchStats();
   fetchLogs();
@@ -60,13 +61,17 @@ function initUIEventListeners() {
   });
   if (btnConnectIpCam) btnConnectIpCam.addEventListener('click', connectIpWebcam);
   if (btnTestIpCam) btnTestIpCam.addEventListener('click', testIpWebcam);
+  const btnAutoDetect = document.getElementById('btnAutoDetectIpCam');
+  const btnUseGateway = document.getElementById('btnUseGatewayIp');
+  if (btnAutoDetect) btnAutoDetect.addEventListener('click', autoDetectIpWebcam);
+  if (btnUseGateway) btnUseGateway.addEventListener('click', useGatewayIp);
   if (btnToggleTorch) btnToggleTorch.addEventListener('click', () => controlIpWebcam('torch_toggle'));
   if (btnFlipCamera) btnFlipCamera.addEventListener('click', () => controlIpWebcam('camera_flip'));
   if (btnTriggerFocus) btnTriggerFocus.addEventListener('click', () => controlIpWebcam('focus'));
 
   const savedIpUrl = localStorage.getItem('solarguard_ip_webcam_url');
   if (savedIpUrl && inputMobileIp) {
-    inputMobileIp.value = savedIpUrl;
+    inputMobileIp.value = savedIpUrl.replace(/\/video\/?$/i, '');
   }
   const btnEspConnect = document.getElementById('btnEspConnect');
   const btnTestRedOn = document.getElementById('btnTestRedOn');
@@ -115,6 +120,8 @@ function initUIEventListeners() {
     modalSettings.classList.remove('active');
   });
   if (btnSaveSettings) btnSaveSettings.addEventListener('click', saveThresholdSettings);
+  const btnTrainModel = document.getElementById('btnTrainModel');
+  if (btnTrainModel) btnTrainModel.addEventListener('click', triggerModelTraining);
 
   // Export CSV & Logs
   const btnExportCsv = document.getElementById('btnExportCsv');
@@ -305,7 +312,7 @@ function updateDashboardUI(data) {
 
   // Auto pre-fill input if empty and backend has saved IP URL
   if (inputMobileIpUrl && !inputMobileIpUrl.value && cam.ip_camera_url) {
-    inputMobileIpUrl.value = cam.ip_camera_url;
+    inputMobileIpUrl.value = cam.ip_camera_url.replace(/\/video\/?$/i, '');
   }
 }
 
@@ -372,6 +379,13 @@ function renderLogs(logs) {
   }
 }
 
+function refreshVideoStream() {
+  const liveFeed = document.getElementById('liveVideoFeed');
+  if (liveFeed) {
+    liveFeed.src = '/video_feed?t=' + Date.now();
+  }
+}
+
 /**
  * Camera Actions
  */
@@ -385,6 +399,7 @@ async function startCamera(camIndex = null) {
     });
     const data = await resp.json();
     showToast(data.message || 'Camera started');
+    refreshVideoStream();
   } catch (e) {
     showToast('Failed to start camera', true);
   }
@@ -395,6 +410,7 @@ async function stopCamera() {
     const resp = await fetch('/api/camera/stop', { method: 'POST' });
     const data = await resp.json();
     showToast(data.message || 'Camera stopped');
+    refreshVideoStream();
   } catch (e) {
     showToast('Failed to stop camera', true);
   }
@@ -403,10 +419,83 @@ async function stopCamera() {
 function toggleMobileCamPanel() {
   const panel = document.getElementById('mobileCamPanel');
   if (!panel) return;
-  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-  if (panel.style.display === 'block') {
+  const isOpening = panel.style.display === 'none' || !panel.style.display;
+  panel.style.display = isOpening ? 'block' : 'none';
+  if (isOpening) {
+    fetchNetworkDiagnostics();
     const input = document.getElementById('inputMobileIpUrl');
     if (input) input.focus();
+  }
+}
+
+async function fetchNetworkDiagnostics() {
+  try {
+    const resp = await fetch('/api/camera/ip-webcam/diagnostics');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.success && data.diagnostics) {
+      const diag = data.diagnostics;
+      const bannerSsid = document.getElementById('bannerSsid');
+      const btnUseGateway = document.getElementById('btnUseGatewayIp');
+      if (bannerSsid) {
+        bannerSsid.textContent = diag.wifi_ssid || 'Local Wi-Fi';
+      }
+      if (btnUseGateway && diag.suggested_url) {
+        btnUseGateway.textContent = `Use ${diag.gateway_ip || 'Hotspot'}:8080`;
+        btnUseGateway.setAttribute('data-url', diag.suggested_url);
+      }
+    }
+  } catch (e) {
+    console.warn("Network diagnostics fetch failed:", e);
+  }
+}
+
+function useGatewayIp() {
+  const btn = document.getElementById('btnUseGatewayIp');
+  const input = document.getElementById('inputMobileIpUrl');
+  if (!input) return;
+  const rawUrl = btn ? (btn.getAttribute('data-url') || 'http://10.89.28.44:8080') : 'http://10.89.28.44:8080';
+  const url = rawUrl.replace(/\/video\/?$/i, '');
+  input.value = url;
+  showToast(`Pasted ${url} - Tap 'Connect Phone'`);
+}
+
+async function autoDetectIpWebcam() {
+  const btn = document.getElementById('btnAutoDetectIpCam');
+  const input = document.getElementById('inputMobileIpUrl');
+  const errBox = document.getElementById('mobileCamErrorBox');
+  const originalHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '🔍 Scanning...';
+  }
+  showToast('Scanning network for Android IP Webcam...');
+  try {
+    const resp = await fetch('/api/camera/ip-webcam/discover');
+    const data = await resp.json();
+    if (data.success && data.found && data.cameras && data.cameras.length > 0) {
+      const cam = data.cameras[0];
+      const rawUrl = cam.url || `http://${cam.host || cam.ip}:${cam.port || 8080}`;
+      const streamUrl = rawUrl.replace(/\/video\/?$/i, '');
+      if (input) input.value = streamUrl;
+      if (errBox) errBox.style.display = 'none';
+      showToast(`🎯 Found camera at ${cam.host || cam.ip}:${cam.port || 8080}! Connecting...`);
+      await connectIpWebcam();
+    } else {
+      if (errBox) {
+        errBox.style.display = 'block';
+        const msgSpan = document.getElementById('mobileCamErrorMsg');
+        if (msgSpan) msgSpan.textContent = 'Auto-detect found no IP Webcam broadcasting';
+      }
+      showToast('No active IP Webcam found. Ensure "Start server" is tapped in IP Webcam app.', true);
+    }
+  } catch (e) {
+    showToast(`Discovery failed: ${e.message}`, true);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
   }
 }
 
@@ -452,6 +541,7 @@ async function onCameraSelected(e) {
     const data = await resp.json();
     if (data.success) {
       showToast(`Camera switched to: ${val === 'ip_webcam' ? 'Mobile IP Webcam' : val}`);
+      refreshVideoStream();
     } else {
       showToast(data.error || 'Error switching camera', true);
     }
@@ -462,7 +552,13 @@ async function onCameraSelected(e) {
 
 async function connectIpWebcam() {
   const input = document.getElementById('inputMobileIpUrl');
-  const target = input ? input.value.trim() : '';
+  const errBox = document.getElementById('mobileCamErrorBox');
+  const errMsg = document.getElementById('mobileCamErrorMsg');
+  const rawTarget = input ? input.value.trim() : '';
+  const target = rawTarget.replace(/\/video\/?$/i, '');
+  if (input && input.value !== target) {
+    input.value = target;
+  }
 
   if (!target) {
     showToast('Please enter your mobile phone IP address or URL', true);
@@ -479,23 +575,40 @@ async function connectIpWebcam() {
     });
     const data = await resp.json();
     if (data.success) {
-      localStorage.setItem('solarguard_ip_webcam_url', data.url);
-      if (input) input.value = data.url;
+      if (errBox) errBox.style.display = 'none';
+      const cleanUrl = (data.url || target).replace(/\/video\/?$/i, '');
+      localStorage.setItem('solarguard_ip_webcam_url', cleanUrl);
+      if (input) input.value = cleanUrl;
       showToast(data.message || 'Connected to Mobile IP Webcam!');
       await fetchCameraDevices();
       const select = document.getElementById('cameraDeviceSelect');
       if (select) select.value = 'ip_webcam';
+      refreshVideoStream();
     } else {
+      if (errBox) {
+        errBox.style.display = 'block';
+        if (errMsg) errMsg.textContent = data.message || data.error || 'Connection failed';
+      }
       showToast(data.error || data.message || 'Connection failed', true);
     }
   } catch (e) {
+    if (errBox) {
+      errBox.style.display = 'block';
+      if (errMsg) errMsg.textContent = `Error: ${e.message}`;
+    }
     showToast(`Failed connecting to mobile phone: ${e.message}`, true);
   }
 }
 
 async function testIpWebcam() {
   const input = document.getElementById('inputMobileIpUrl');
-  const target = input ? input.value.trim() : '';
+  const errBox = document.getElementById('mobileCamErrorBox');
+  const errMsg = document.getElementById('mobileCamErrorMsg');
+  const rawTarget = input ? input.value.trim() : '';
+  const target = rawTarget.replace(/\/video\/?$/i, '');
+  if (input && input.value !== target) {
+    input.value = target;
+  }
 
   showToast('Testing connection to mobile IP Webcam...');
   try {
@@ -506,15 +619,24 @@ async function testIpWebcam() {
     });
     const data = await resp.json();
     if (data.success) {
+      if (errBox) errBox.style.display = 'none';
       const ms = data.details && data.details.latency_ms;
       const battery = data.details && data.details.battery;
       let msg = `✅ Phone reachable (${ms ? ms + 'ms' : 'OK'})`;
       if (battery !== undefined) msg += ` - Battery: ${battery}%`;
       showToast(msg);
     } else {
+      if (errBox) {
+        errBox.style.display = 'block';
+        if (errMsg) errMsg.textContent = data.message || 'Phone unreachable on network';
+      }
       showToast(data.message || 'Phone unreachable on network', true);
     }
   } catch (e) {
+    if (errBox) {
+      errBox.style.display = 'block';
+      if (errMsg) errMsg.textContent = `Ping error: ${e.message}`;
+    }
     showToast(`Test failed: ${e.message}`, true);
   }
 }
@@ -765,6 +887,7 @@ async function fetchInitialConfig() {
   } catch (e) {
     console.warn("Failed fetching settings:", e);
   }
+  fetchModelStatus();
   fetchHistoryTable();
 }
 
@@ -795,6 +918,73 @@ async function saveThresholdSettings() {
     }
   } catch (e) {
     showToast('Failed saving thresholds', true);
+  }
+}
+
+/**
+ * Model Training & Dataset Calibration
+ */
+async function fetchModelStatus() {
+  try {
+    const resp = await fetch('/api/model/status');
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.success && data.model) {
+        updateModelStatusUI(data.model);
+      }
+    }
+  } catch (e) {
+    console.warn("Failed fetching model status:", e);
+  }
+}
+
+function updateModelStatusUI(model) {
+  const badge = document.getElementById('modelAccuracyBadge');
+  const datasetName = document.getElementById('modelDatasetName');
+  const sampleCount = document.getElementById('modelSampleCount');
+
+  if (badge) {
+    badge.textContent = `${model.accuracy}% Accuracy`;
+  }
+  if (datasetName) {
+    datasetName.textContent = `${model.dataset_name} (${(model.clean_samples || 0) + (model.dirty_samples || 0)} samples)`;
+  }
+  if (sampleCount) {
+    sampleCount.textContent = `${model.clean_samples || 0} Clean, ${model.dirty_samples || 0} Dirty`;
+  }
+}
+
+async function triggerModelTraining() {
+  const btn = document.getElementById('btnTrainModel');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span style="display:inline-block; width:12px; height:12px; border:2px solid #ccc; border-top-color:var(--teal-primary); border-radius:50%; animation:spin 1s linear infinite; margin-right:6px;"></span> Calibrating Model...`;
+  }
+  showToast('Running computer vision training on dataset...');
+  try {
+    const resp = await fetch('/api/model/train', { method: 'POST' });
+    const data = await resp.json();
+    if (data.success) {
+      showToast(`Training complete! Accuracy: ${data.accuracy}%, F1: ${data.f1_score}%`);
+      fetchModelStatus();
+      loadReferencePreview();
+    } else {
+      showToast(data.error || 'Model training failed', true);
+    }
+  } catch (e) {
+    showToast(`Training error: ${e.message}`, true);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"></polyline>
+          <polyline points="1 20 1 14 7 14"></polyline>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+        </svg>
+        Re-Train & Calibrate Model
+      `;
+    }
   }
 }
 

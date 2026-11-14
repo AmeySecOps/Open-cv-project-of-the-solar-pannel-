@@ -80,11 +80,12 @@ def draw_hud_overlay(
     confidence: float,
     roi_coords: tuple = None,
     fps: float = 0.0,
-    esp32_connected: bool = False
+    esp32_connected: bool = False,
+    debris_boxes: list = None
 ) -> np.ndarray:
     """
     Renders a professional industrial telemetry HUD overlay onto the camera frame.
-    Includes bounding box for ROI, status badges, soiling indicator bar, and telemetry.
+    Includes bounding box for ROI, detected debris outlines, status badges, soiling indicator bar, and telemetry.
     """
     if frame is None or frame.size == 0:
         return frame
@@ -136,6 +137,18 @@ def draw_hud_overlay(
 
         cv2.putText(annotated, "ROI: SOLAR PANEL TARGET", (x1 + 6, max(y1 - 8, 20)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.42, (220, 220, 220), 1, cv2.LINE_AA)
+
+    # 1.5 Draw Detected Dirt & Debris Objects
+    if debris_boxes:
+        for idx, box in enumerate(debris_boxes):
+            bx = int(box.get("x", 0))
+            by = int(box.get("y", 0))
+            bw = int(box.get("w", 0))
+            bh = int(box.get("h", 0))
+            box_col = (0, 215, 255)  # Bright amber/gold
+            cv2.rectangle(annotated, (bx, by), (bx + bw, by + bh), box_col, 2)
+            cv2.putText(annotated, f"DIRT #{idx+1}", (bx, max(by - 5, 12)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, box_col, 1, cv2.LINE_AA)
 
     # 2. Top Header Bar (HUD overlay)
     bar_h = 44

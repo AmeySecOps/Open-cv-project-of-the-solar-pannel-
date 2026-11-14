@@ -6,12 +6,17 @@ reference image management, and MJPEG video streaming.
 
 import time
 import threading
-import time
+import socket
+import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Optional, Tuple, Union, Any
 from urllib.parse import urlparse, urlunparse
 import cv2
 import numpy as np
 import requests
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from backend.config import Config
 from backend.database import Database
@@ -21,11 +26,8 @@ from backend.utils import logger, encode_image_to_base64
 def normalize_camera_source(source: Any) -> Tuple[Any, str]:
     """
     Normalizes a camera source input into either an integer index or a valid HTTP/RTSP stream URL.
-    Returns:
-        (normalized_source, camera_type) where camera_type is:
-        - 'usb': physical USB camera index (int >= 0)
-        - 'simulation': virtual test generator (int == -1)
-        - 'ip_webcam': HTTP/RTSP video stream URL (str)
+    Handles IPv4, IPv6 (bracketed or unbracketed), http/https normalization,
+    and automatic default port (:8080) and path (/video).
     """
     if source is None:
         return 0, "usb"
@@ -35,7 +37,7 @@ def normalize_camera_source(source: Any) -> Tuple[Any, str]:
             return -1, "simulation"
         return source, "usb"
 
-    s = str(source).strip()
+    s = str(source).strip().strip("'\"")
     if not s:
         return 0, "usb"
 
@@ -56,40 +58,175 @@ def normalize_camera_source(source: Any) -> Tuple[Any, str]:
         saved = Database.get_setting("ip_webcam_url", Config.DEFAULT_IP_WEBCAM_URL)
         return normalize_camera_source(saved)
 
-    # It's an IP address or URL string
-    if not s.startswith(("http://", "https://", "rtsp://")):
-        s = f"http://{s}"
+    # Detect scheme: IP Webcam uses plain HTTP by default.
+    # If user typed https://, convert to http:// so OpenCV & requests don't fail on TLS.
+    scheme = "http"
+    if s.startswith("rtsp://"):
+        scheme = "rtsp"
+        s = s[7:]
+    elif s.startswith("http://"):
+        s = s[7:]
+    elif s.startswith("https://"):
+        scheme = "http"
+        s = s[8:]
 
-    parsed = urlparse(s)
-    scheme = parsed.scheme or "http"
-    netloc = parsed.netloc or parsed.path.split("/")[0]
-    path = parsed.path
+    # Separate host:port and path
+    # Mobile IP Webcam IDs are addressed as base URLs like http://10.89.28.44:8080.
+    # Do NOT append /video to the clean camera ID. If /video or /videofeed is present, strip it.
+    path = ""
+    if "/" in s:
+        parts = s.split("/", 1)
+        host_port = parts[0]
+        remainder = "/" + parts[1].lstrip("/")
+        if remainder.rstrip("/") in ("/video", "/videofeed", ""):
+            path = ""
+        else:
+            path = remainder.rstrip("/")
+    else:
+        host_port = s
+        path = ""
 
-    if not netloc:
-        netloc = s.replace("http://", "").replace("https://", "").split("/")[0]
+    # Parse host and port:
+    # 1. Bracketed IPv6: e.g. [2401:4900:ad53:6f77::77]:8080 or [2401:...]
+    if host_port.startswith("["):
+        bracket_end = host_port.find("]")
+        if bracket_end != -1:
+            ip_part = host_port[1:bracket_end]
+            port_part = host_port[bracket_end + 1:]
+            port = port_part[1:] if port_part.startswith(":") else "8080"
+            netloc = f"[{ip_part}]:{port}"
+        else:
+            netloc = f"{host_port}:8080"
+    # 2. Unbracketed IPv6 (contains '::' or 2+ colons)
+    elif host_port.count(":") >= 2:
+        tokens = host_port.rsplit(":", 1)
+        if len(tokens) == 2 and tokens[1] in ("8080", "8081", "4747", "8000", "80", "443", "8888"):
+            ip_part = tokens[0]
+            port = tokens[1]
+        else:
+            ip_part = host_port
+            port = "8080"
+        netloc = f"[{ip_part}]:{port}"
+    # 3. IPv4 or hostname
+    else:
+        netloc = host_port if ":" in host_port else f"{host_port}:8080"
 
-    # Default port for Android IP Webcam app is 8080 if not specified
-    if ":" not in netloc and scheme == "http":
-        netloc = f"{netloc}:8080"
-
-    # Default path for IP Webcam primary video stream is /video
-    if not path or path == "/":
-        path = "/video"
-
-    normalized_url = urlunparse((
-        scheme,
-        netloc,
-        path,
-        parsed.params,
-        parsed.query,
-        parsed.fragment
-    ))
+    normalized_url = f"{scheme}://{netloc}{path}"
     return normalized_url, "ip_webcam"
+
+
+def get_network_diagnostics() -> Dict[str, Any]:
+    """
+    Retrieves network context: host IP, default router/hotspot gateway IP, and Wi-Fi SSID.
+    Enables automatic identification of mobile phone hotspot IP (e.g. 10.89.28.44).
+    """
+    host_ip = "127.0.0.1"
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        host_ip = s.getsockname()[0]
+        s.close()
+    except Exception:
+        pass
+
+    gateway_ip = None
+    try:
+        out = subprocess.check_output(["route", "print", "0.0.0.0"], text=True, stderr=subprocess.DEVNULL)
+        for line in out.splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 5 and parts[0] == "0.0.0.0" and parts[1] == "0.0.0.0":
+                gateway_ip = parts[2]
+                break
+    except Exception:
+        pass
+
+    ssid = None
+    try:
+        wlan_out = subprocess.check_output(["netsh", "wlan", "show", "interfaces"], text=True, stderr=subprocess.DEVNULL)
+        for line in wlan_out.splitlines():
+            if "SSID" in line and "BSSID" not in line:
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    ssid = parts[1].strip()
+                    break
+    except Exception:
+        pass
+
+    suggested_url = f"http://{gateway_ip}:8080" if gateway_ip else "http://192.168.1.100:8080"
+    is_hotspot = False
+    if ssid and any(w in ssid.lower() for w in ("phone", "hotspot", "amey", "galaxy", "iphone", "pixel", "oneplus")):
+        is_hotspot = True
+
+    return {
+        "host_ip": host_ip,
+        "gateway_ip": gateway_ip,
+        "ssid": ssid or "Connected Wi-Fi",
+        "is_hotspot": is_hotspot,
+        "suggested_url": suggested_url
+    }
+
+
+def scan_for_ip_webcams(timeout: float = 0.4) -> List[Dict[str, Any]]:
+    """
+    Rapidly scans the local network and hotspot gateway for active IP Webcam servers.
+    Checks ports 8080, 8081, 4747 on the gateway and local subnet.
+    """
+    candidates = []
+    diag = get_network_diagnostics()
+    gw = diag.get("gateway_ip")
+    if gw:
+        candidates.append(gw)
+
+    candidates.extend(["10.89.28.44", "192.168.43.1", "192.168.1.100", "192.168.1.105"])
+
+    host_ip = diag.get("host_ip", "")
+    if host_ip and host_ip.count(".") == 3:
+        prefix = host_ip.rsplit(".", 1)[0]
+        for i in (1, 2, 44, 100, 101, 105, 118, 150):
+            candidates.append(f"{prefix}.{i}")
+
+    # Remove duplicates preserving order
+    seen = set()
+    unique_candidates = [c for c in candidates if not (c in seen or seen.add(c))]
+
+    discovered = []
+    ports = [8080, 8081, 4747]
+
+    def test_endpoint(ip, port):
+        url = f"http://{ip}:{port}"
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            if s.connect_ex((ip, port)) == 0:
+                s.close()
+                ok, msg, details = probe_ip_webcam(url, timeout=0.8)
+                if ok:
+                    discovered.append({
+                        "ip": ip,
+                        "port": port,
+                        "url": details.get("url", f"http://{ip}:{port}"),
+                        "battery": details.get("battery"),
+                        "resolution": details.get("resolution"),
+                        "latency_ms": details.get("latency_ms"),
+                        "device_name": f"📱 Mobile Phone ({ip}:{port})"
+                    })
+            else:
+                s.close()
+        except Exception:
+            pass
+
+    with ThreadPoolExecutor(max_workers=30) as ex:
+        for ip in unique_candidates:
+            for port in ports:
+                ex.submit(test_endpoint, ip, port)
+
+    return discovered
 
 
 def probe_ip_webcam(url: str, timeout: float = 2.0) -> Tuple[bool, str, Dict[str, Any]]:
     """
     Tests connectivity to a mobile phone running IP Webcam.
+    Checks candidate endpoints (/status.json, /shot.jpg, /video) with verify=False for self-signed certificates.
     Returns (is_reachable, message, info_dict).
     """
     try:
@@ -103,45 +240,68 @@ def probe_ip_webcam(url: str, timeout: float = 2.0) -> Tuple[bool, str, Dict[str
         details: Dict[str, Any] = {
             "url": normalized_url,
             "base_url": base_url,
+            "stream_url": f"{base_url}/video",
+            "snapshot_url": f"{base_url}/shot.jpg",
             "host": parsed.netloc,
-            "latency_ms": None
+            "latency_ms": None,
+            "stream_mode": "video"
         }
 
         t0 = time.time()
 
-        # 1. Check IP Webcam status.json for phone metadata (battery, orientation)
+        # 1. First probe status.json (instant JSON response from IP Webcam)
+        for scheme in ("http", "https"):
+            probe_base = f"{scheme}://{parsed.netloc}"
+            try:
+                resp = requests.get(f"{probe_base}/status.json", timeout=timeout, verify=False)
+                if resp.status_code == 200:
+                    details["latency_ms"] = round((time.time() - t0) * 1000, 1)
+                    details["base_url"] = probe_base
+                    details["url"] = normalized_url
+                    try:
+                        data = resp.json()
+                        details["status_json"] = data
+                        if "battery" in data:
+                            details["battery"] = data.get("battery")
+                        if "curvideo" in data:
+                            details["resolution"] = data.get("curvideo")
+                    except Exception:
+                        pass
+                    return True, f"Connected to Mobile IP Webcam at {parsed.netloc} ({details['latency_ms']}ms).", details
+            except Exception:
+                pass
+
+        # 2. Probe shot.jpg (snapshot endpoint supported by all versions of IP Webcam)
         try:
-            resp = requests.get(f"{base_url}/status.json", timeout=timeout)
+            resp = requests.get(f"{base_url}/shot.jpg", timeout=timeout, verify=False, stream=True)
             if resp.status_code == 200:
                 details["latency_ms"] = round((time.time() - t0) * 1000, 1)
-                try:
-                    data = resp.json()
-                    details["status_json"] = data
-                    if "battery" in data:
-                        details["battery"] = data.get("battery")
-                except Exception:
-                    pass
-                return True, f"Connected to Mobile IP Webcam at {parsed.netloc} ({details['latency_ms']}ms).", details
+                details["stream_mode"] = "snapshot"
+                details["url"] = normalized_url
+                resp.close()
+                return True, f"Connected to IP Webcam snapshot feed at {parsed.netloc} ({details['latency_ms']}ms).", details
         except Exception:
             pass
 
-        # 2. Probe stream endpoint directly
-        resp = requests.get(normalized_url, stream=True, timeout=timeout)
-        details["latency_ms"] = round((time.time() - t0) * 1000, 1)
-        if resp.status_code == 200:
-            try:
-                next(resp.iter_content(chunk_size=256))
-            except Exception:
-                pass
-            resp.close()
-            return True, f"Connected to camera stream at {parsed.netloc} ({details['latency_ms']}ms).", details
+        # 3. Probe video stream endpoint directly
+        stream_probe_url = f"{base_url}/video" if not parsed.path else normalized_url
+        try:
+            resp = requests.get(stream_probe_url, stream=True, timeout=timeout, verify=False)
+            if resp.status_code == 200:
+                details["latency_ms"] = round((time.time() - t0) * 1000, 1)
+                details["stream_mode"] = "mjpeg"
+                details["url"] = normalized_url
+                resp.close()
+                return True, f"Connected to camera stream at {parsed.netloc} ({details['latency_ms']}ms).", details
+        except Exception:
+            pass
 
-        return False, f"Server at {parsed.netloc} returned HTTP {resp.status_code}.", details
+        return False, (
+            f"Could not connect to IP Webcam at {parsed.netloc}. "
+            "Please ensure 'Start server' is running in the IP Webcam app on your phone, "
+            "and your laptop is connected to the same Wi-Fi/Hotspot."
+        ), details
 
-    except requests.exceptions.ConnectTimeout:
-        return False, "Connection timed out. Ensure your phone and PC are connected to the same Wi-Fi network and IP Webcam is started.", {}
-    except requests.exceptions.ConnectionError:
-        return False, "Connection refused. Please ensure 'Start server' is running in the IP Webcam app on your phone.", {}
     except Exception as e:
         return False, f"Failed to reach IP Webcam: {str(e)}", {}
 
@@ -178,7 +338,7 @@ def control_ip_webcam(url: str, command: str) -> Tuple[bool, str]:
         else:
             return False, f"Unsupported command '{command}'"
 
-        resp = requests.get(endpoint, timeout=2.5)
+        resp = requests.get(endpoint, timeout=2.5, verify=False)
         if resp.status_code in (200, 204):
             return True, f"Command '{command}' executed successfully."
         return False, f"Phone returned HTTP {resp.status_code}"
@@ -202,6 +362,9 @@ class CameraManager:
         # Mobile IP Webcam properties
         self.ip_camera_url = Database.get_setting("ip_webcam_url", Config.DEFAULT_IP_WEBCAM_URL)
         self.is_ip_camera = (self.camera_type == "ip_webcam")
+        self.stream_url: Optional[str] = None
+        self.snapshot_url: Optional[str] = None
+        self.is_snapshot_mode = False
         self.torch_active = False
         self.camera_facing = "back"
 
@@ -314,45 +477,88 @@ class CameraManager:
                 return True
 
             # Open physical camera or IP Webcam network stream
+            self.simulation_mode = False
+            self.is_snapshot_mode = False
+            self.annotated_frame = None
+
             try:
                 logger.info(f"Connecting to camera source: {self.camera_source} (type: {self.camera_type})")
-                self.cap = cv2.VideoCapture(self.camera_source)
-
-                if not self.cap.isOpened():
-                    msg = (
-                        f"Could not connect to Mobile IP Webcam at {self.camera_source}. Ensure 'Start server' is running in IP Webcam on your phone and on same Wi-Fi."
-                        if self.is_ip_camera else
-                        f"Could not open physical camera device {self.camera_source}."
-                    )
-                    logger.warning(f"{msg} Falling back to virtual simulation generator.")
-                    self.error_message = msg
-                    self.simulation_mode = True
-                    self.cap = None
-                else:
-                    self.simulation_mode = False
-                    # Minimize buffer lag for live network streams
-                    try:
-                        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                    except Exception:
-                        pass
-                    self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-                    self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-                    self.cap.set(cv2.CAP_PROP_FPS, self.fps_target)
-
-                    # Verify read
-                    ret, test_frame = self.cap.read()
-                    if not ret or test_frame is None:
-                        logger.warning("Camera opened but failed to capture initial frame. Falling back to simulation.")
-                        self.cap.release()
-                        self.cap = None
-                        self.simulation_mode = True
+                
+                # Setup snapshot and stream URLs for IP Webcam
+                if self.is_ip_camera:
+                    parsed = urlparse(str(self.camera_source))
+                    base_url = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+                    path = parsed.path.rstrip("/")
+                    if path.endswith(".jpg"):
+                        self.stream_url = str(self.camera_source)
+                        self.is_snapshot_mode = True
+                    elif path in ("/video", "/videofeed") or path.endswith(".mjpg"):
+                        self.stream_url = str(self.camera_source)
                     else:
-                        self.latest_frame = test_frame
+                        self.stream_url = f"{base_url}/video"
+
+                    self.snapshot_url = f"{base_url}/shot.jpg"
+                    reachable, probe_msg, details = probe_ip_webcam(str(self.camera_source), timeout=2.5)
+                    if not reachable:
+                        logger.warning(f"Mobile IP Webcam unreachable: {probe_msg}. Falling back to virtual simulation.")
+                        self.error_message = probe_msg
+                        self.simulation_mode = True
+                        self.cap = None
+
+                if not self.simulation_mode:
+                    capture_endpoint = self.stream_url if (self.is_ip_camera and self.stream_url) else self.camera_source
+                    self.cap = cv2.VideoCapture(capture_endpoint)
+
+                    if not self.cap.isOpened():
+                        # Before falling back to simulation, check if snapshot mode works
+                        if self.is_ip_camera and self.snapshot_url:
+                            ok, _, _ = probe_ip_webcam(self.snapshot_url, timeout=1.5)
+                            if ok:
+                                self.is_snapshot_mode = True
+                                self.simulation_mode = False
+                                self.cap = None
+                                logger.info(f"Stream endpoint failed, but snapshot endpoint is available. Using snapshot feed: {self.snapshot_url}")
+
+                        if not self.is_snapshot_mode:
+                            msg = (
+                                f"Could not connect to Mobile IP Webcam at {self.camera_source}. Ensure 'Start server' is running in IP Webcam on your phone and on same Wi-Fi."
+                                if self.is_ip_camera else
+                                f"Could not open physical camera device {self.camera_source}."
+                            )
+                            logger.warning(f"{msg} Falling back to virtual simulation generator.")
+                            self.error_message = msg
+                            self.simulation_mode = True
+                            self.cap = None
+                    else:
+                        self.simulation_mode = False
+                        self.is_snapshot_mode = False
+                        # Minimize buffer lag for live network streams
+                        try:
+                            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                        except Exception:
+                            pass
+                        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                        self.cap.set(cv2.CAP_PROP_FPS, self.fps_target)
+
+                        # Verify read
+                        ret, test_frame = self.cap.read()
+                        if not ret or test_frame is None:
+                            logger.warning("Camera opened but failed to capture initial frame.")
+                            if self.is_ip_camera and self.snapshot_url:
+                                self.is_snapshot_mode = True
+                                self.simulation_mode = False
+                            else:
+                                self.simulation_mode = True
+                            self.cap.release()
+                            self.cap = None
+                        else:
+                            self.latest_frame = test_frame
 
                 self.is_running = True
                 self.thread = threading.Thread(target=self._capture_loop, daemon=True, name="CameraCaptureWorker")
                 self.thread.start()
-                logger.info(f"Camera manager started on source {self.camera_source} (Simulation={self.simulation_mode}, IP={self.is_ip_camera}).")
+                logger.info(f"Camera manager started on source {self.camera_source} (Simulation={self.simulation_mode}, IP={self.is_ip_camera}, SnapshotMode={self.is_snapshot_mode}).")
                 return True
             except Exception as e:
                 self.error_message = f"Failed to start camera: {e}"
@@ -378,6 +584,7 @@ class CameraManager:
                 except Exception as e:
                     logger.error(f"Error releasing camera: {e}")
                 self.cap = None
+            self.annotated_frame = None
             logger.info("Camera stream stopped.")
 
     def _capture_loop(self):
@@ -386,32 +593,49 @@ class CameraManager:
         consecutive_failures = 0
         last_reconnect_attempt = 0.0
         reconnect_interval = 3.0
+        session = requests.Session()
+        session.trust_env = False
 
         while self.is_running:
             loop_start = time.time()
 
-            if not self.simulation_mode and self.cap is not None:
-                try:
-                    if self.cap.isOpened():
-                        ret, frame = self.cap.read()
-                        if ret and frame is not None and frame.size > 0:
-                            consecutive_failures = 0
-                            if frame.shape[1] != self.width or frame.shape[0] != self.height:
-                                frame = cv2.resize(frame, (self.width, self.height))
-                            with self.lock:
-                                self.latest_frame = frame
-                                self.frame_count += 1
-                                self.error_message = None
-                        else:
-                            consecutive_failures += 1
-                    else:
-                        consecutive_failures += 1
-                except Exception as e:
+            if not self.simulation_mode:
+                frame = None
+                # 1. Attempt read from cv2.VideoCapture stream
+                if self.cap is not None:
+                    try:
+                        if self.cap.isOpened():
+                            ret, cap_frame = self.cap.read()
+                            if ret and cap_frame is not None and cap_frame.size > 0:
+                                frame = cap_frame
+                    except Exception as e:
+                        logger.debug(f"Frame read exception: {e}")
+
+                # 2. Seamless fallback to HTTP snapshot polling if cv2.VideoCapture drops or fails on IP camera
+                if frame is None and self.is_ip_camera and self.snapshot_url:
+                    try:
+                        resp = session.get(self.snapshot_url, timeout=0.8, verify=False)
+                        if resp.status_code == 200 and resp.content:
+                            arr = np.frombuffer(resp.content, np.uint8)
+                            s_frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                            if s_frame is not None and s_frame.size > 0:
+                                frame = s_frame
+                    except Exception:
+                        pass
+
+                if frame is not None and frame.size > 0:
+                    consecutive_failures = 0
+                    if frame.shape[1] != self.width or frame.shape[0] != self.height:
+                        frame = cv2.resize(frame, (self.width, self.height))
+                    with self.lock:
+                        self.latest_frame = frame
+                        self.frame_count += 1
+                        self.error_message = None
+                else:
                     consecutive_failures += 1
-                    logger.debug(f"Frame read exception: {e}")
 
                 # Automatic reconnection for IP Webcam network streams
-                if self.is_ip_camera and consecutive_failures >= 5:
+                if self.is_ip_camera and consecutive_failures >= 15:
                     now = time.time()
                     if now - last_reconnect_attempt >= reconnect_interval:
                         last_reconnect_attempt = now
@@ -422,7 +646,8 @@ class CameraManager:
                         except Exception:
                             pass
                         try:
-                            new_cap = cv2.VideoCapture(self.camera_source)
+                            reconnect_endpoint = self.stream_url if (self.is_ip_camera and self.stream_url) else self.camera_source
+                            new_cap = cv2.VideoCapture(reconnect_endpoint)
                             if new_cap.isOpened():
                                 try:
                                     new_cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -431,6 +656,8 @@ class CameraManager:
                                 self.cap = new_cap
                                 consecutive_failures = 0
                                 logger.info(f"Successfully reconnected to IP camera: {self.camera_source}")
+                            else:
+                                self.cap = None
                         except Exception as re_err:
                             logger.debug(f"Stream reconnection failed: {re_err}")
             else:

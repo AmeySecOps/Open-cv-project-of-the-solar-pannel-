@@ -140,7 +140,8 @@ class MonitoringService:
             confidence=confidence,
             roi_coords=roi_coords,
             fps=camera_manager.current_fps,
-            esp32_connected=esp32_controller.is_connected
+            esp32_connected=esp32_controller.is_connected,
+            debris_boxes=analysis.get("debris_boxes", [])
         )
         camera_manager.set_annotated_frame(annotated)
 

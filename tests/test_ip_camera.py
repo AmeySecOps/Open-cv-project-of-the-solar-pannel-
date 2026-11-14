@@ -40,26 +40,26 @@ class TestIPWebcamIntegration(unittest.TestCase):
         self.assertEqual(normalize_camera_source("virtual"), (-1, "simulation"))
 
     def test_normalize_ip_webcam_urls(self):
-        """Validates that IP addresses, ports, and incomplete URLs format to valid IP Webcam endpoints."""
-        # Bare IP defaults to port 8080 and /video
+        """Validates that IP addresses, ports, and incomplete URLs format to valid clean IP Webcam base endpoints."""
+        # Bare IP defaults to port 8080 (without /video)
         self.assertEqual(
             normalize_camera_source("192.168.1.100"),
-            ("http://192.168.1.100:8080/video", "ip_webcam")
+            ("http://192.168.1.100:8080", "ip_webcam")
         )
-        # IP with port adds /video
+        # IP with port keeps clean base endpoint
         self.assertEqual(
             normalize_camera_source("192.168.1.100:8080"),
-            ("http://192.168.1.100:8080/video", "ip_webcam")
+            ("http://192.168.1.100:8080", "ip_webcam")
         )
-        # http:// without path adds /video
+        # http:// without path stays clean base URL
         self.assertEqual(
             normalize_camera_source("http://192.168.1.100:8080"),
-            ("http://192.168.1.100:8080/video", "ip_webcam")
+            ("http://192.168.1.100:8080", "ip_webcam")
         )
-        # Full URL preserved
+        # If /video is given, it normalizes to clean base URL so /video is not forced
         self.assertEqual(
             normalize_camera_source("http://192.168.1.100:8080/video"),
-            ("http://192.168.1.100:8080/video", "ip_webcam")
+            ("http://192.168.1.100:8080", "ip_webcam")
         )
         # Snapshot path preserved
         self.assertEqual(
@@ -166,7 +166,7 @@ class TestIPWebcamIntegration(unittest.TestCase):
 
         success, msg = control_ip_webcam("http://192.168.1.100:8080/video", "torch_on")
         self.assertTrue(success)
-        mock_get.assert_called_with("http://192.168.1.100:8080/enabletorch", timeout=2.5)
+        mock_get.assert_called_with("http://192.168.1.100:8080/enabletorch", timeout=2.5, verify=False)
 
 
 if __name__ == "__main__":

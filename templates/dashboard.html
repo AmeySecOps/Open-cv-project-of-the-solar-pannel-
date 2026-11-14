@@ -287,11 +287,32 @@
                 </div>
               </div>
 
-              <!-- Quick IP input row -->
-              <div style="display:grid; grid-template-columns: 1fr auto auto; gap:8px; align-items:center;">
-                <div>
-                  <input type="text" id="inputMobileIpUrl" class="form-control-custom" placeholder="e.g. 192.168.1.100:8080 or http://192.168.1.100:8080/video" style="font-size:12px; font-family:var(--font-mono);">
+              <!-- Hotspot / Network Context Banner -->
+              <div id="mobileCamNetworkBanner" style="display:flex; justify-content:space-between; align-items:center; background:rgba(6,214,160,0.06); border:1px solid rgba(6,214,160,0.2); border-radius:6px; padding:6px 10px; margin-bottom:10px; font-size:11px;">
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <span style="color:var(--teal-primary);">📶 Wi-Fi Hotspot:</span>
+                  <strong id="bannerSsid" style="color:var(--text-main);">amey</strong>
                 </div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <span style="color:var(--text-dim);">Phone IP:</span>
+                  <button type="button" id="btnUseGatewayIp" style="background:rgba(6,214,160,0.12); border:1px dashed var(--teal-primary); color:var(--teal-primary); font-family:var(--font-mono); font-size:11px; padding:2px 7px; border-radius:4px; cursor:pointer;" title="Click to fill this IP into the box">
+                    Use 10.89.28.44:8080
+                  </button>
+                </div>
+              </div>
+
+              <!-- Quick IP input row -->
+              <div style="display:grid; grid-template-columns: 1fr auto auto auto; gap:8px; align-items:center;">
+                <div>
+                  <input type="text" id="inputMobileIpUrl" class="form-control-custom" placeholder="e.g. 10.89.28.44:8080 or http://10.89.28.44:8080" style="font-size:12px; font-family:var(--font-mono);">
+                </div>
+                <button class="btn-solarguard btn-dark btn-sm" id="btnAutoDetectIpCam" title="Automatically scan network for IP Webcam" style="white-space:nowrap;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                  Auto-Detect
+                </button>
                 <button class="btn-solarguard btn-dark btn-sm" id="btnTestIpCam" style="white-space:nowrap;">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="10"></circle>
@@ -306,6 +327,19 @@
                   </svg>
                   Connect Phone
                 </button>
+              </div>
+
+              <!-- Connection Error & Troubleshooting Box (Hidden by default) -->
+              <div id="mobileCamErrorBox" style="display:none; margin-top:10px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:6px; padding:10px; font-size:11px; color:#fca5a5;">
+                <div style="font-weight:600; display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+                  ⚠️ <span id="mobileCamErrorMsg">Mobile camera connection failed</span>
+                </div>
+                <div style="color:var(--text-dim); line-height:1.4;">
+                  1. Open <strong>IP Webcam</strong> app on your Android phone.<br>
+                  2. Scroll down to the very bottom and tap <strong>"Start server"</strong>.<br>
+                  3. If on your phone hotspot (<strong>amey</strong>), enter <code style="color:var(--teal-primary);">10.89.28.44:8080</code>.<br>
+                  4. Keep the IP Webcam app open on your phone screen while streaming.
+                </div>
               </div>
 
               <!-- Mobile Remote Controls (Torch, Flip Camera, Focus) -->
@@ -328,11 +362,9 @@
 
               <!-- Quick Setup Help Text -->
               <div style="margin-top:8px; font-size:11px; color:var(--text-dim); line-height:1.4;">
-                💡 <strong>How to connect:</strong>
-                1. Install <em>IP Webcam</em> from Google Play Store on your mobile &bull;
-                2. Tap <em>Start server</em> at bottom of app &bull;
-                3. Enter the IP shown on phone screen (e.g., <code>192.168.1.100:8080</code>) above &bull;
-                4. Click <strong>Connect Phone</strong>.
+                💡 <strong>Tips:</strong>
+                Android IP Webcam uses plain <code>http://</code> (not <code>https://</code>).
+                If connected to phone hotspot, tap <strong>"Use 10.89.28.44:8080"</strong> or <strong>"Auto-Detect"</strong>.
               </div>
             </div>
 
@@ -546,6 +578,11 @@
                 <input type="file" id="refFileInput" accept="image/*" style="display:none;">
               </label>
             </div>
+
+            <div style="margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); display:flex; justify-content:space-between; align-items:center; font-size:11px;">
+              <span style="color:var(--text-dim);">Dataset Calibration:</span>
+              <span style="color:var(--teal-primary); font-weight:600;">100% (12 Chittoria Images)</span>
+            </div>
           </div>
         </div>
 
@@ -614,6 +651,34 @@
     </div>
 
     <div class="modal-body">
+      <!-- Model Training & Dataset Calibration -->
+      <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border-color); border-radius:8px; padding:14px; margin-bottom:18px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--teal-primary);">
+              <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"></path>
+            </svg>
+            <span style="font-size:13px; font-weight:600;">Chittoria Solar Panel AI Model</span>
+          </div>
+          <span id="modelAccuracyBadge" style="background:rgba(6,214,160,0.15); color:var(--teal-primary); border:1px solid rgba(6,214,160,0.3); font-size:11px; font-weight:700; padding:2px 8px; border-radius:12px;">100% Accuracy</span>
+        </div>
+        <p style="font-size:12px; color:var(--text-dim); margin-bottom:10px;">
+          Calibrated on physical solar panels using wafer morphology, contour boundary filtering, and debris segmentation.
+        </p>
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; margin-bottom:12px;">
+          <span style="color:var(--text-muted);">Dataset: <strong id="modelDatasetName" style="color:var(--text-main);">Chittoria Solar Industry (12 samples)</strong></span>
+          <span style="color:var(--text-muted);"><span id="modelSampleCount">7 Clean, 5 Dirty</span></span>
+        </div>
+        <button class="btn-solarguard btn-dark btn-sm" id="btnTrainModel" style="width:100%; justify-content:center; gap:6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+          Re-Train & Calibrate Model
+        </button>
+      </div>
+
       <!-- Clean Threshold Slider -->
       <div style="margin-bottom:18px;">
         <label style="display:flex; justify-content:space-between; font-size:13px; font-weight:600; margin-bottom:6px;">

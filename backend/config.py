@@ -22,6 +22,8 @@ else:
 class Config:
     """System configuration parameters."""
 
+    BASE_DIR = BASE_DIR
+
     # Server settings
     HOST = os.getenv("HOST", "0.0.0.0")
     PORT = int(os.getenv("PORT", 5000))
@@ -37,7 +39,7 @@ class Config:
     # Camera defaults
     DEFAULT_CAMERA_INDEX = int(os.getenv("CAMERA_INDEX", 0))
     DEFAULT_CAMERA_SOURCE = os.getenv("CAMERA_SOURCE", os.getenv("CAMERA_INDEX", "0"))
-    DEFAULT_IP_WEBCAM_URL = os.getenv("IP_WEBCAM_URL", "http://192.168.1.100:8080/video")
+    DEFAULT_IP_WEBCAM_URL = os.getenv("IP_WEBCAM_URL", "http://192.168.1.100:8080")
     DEFAULT_WIDTH = int(os.getenv("CAMERA_WIDTH", 640))
     DEFAULT_HEIGHT = int(os.getenv("CAMERA_HEIGHT", 480))
     DEFAULT_FPS = int(os.getenv("CAMERA_FPS", 30))

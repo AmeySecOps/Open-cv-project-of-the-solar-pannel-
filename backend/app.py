@@ -27,9 +27,12 @@ from backend.camera_manager import (
     camera_manager,
     probe_ip_webcam,
     control_ip_webcam,
-    normalize_camera_source
+    normalize_camera_source,
+    get_network_diagnostics,
+    scan_for_ip_webcams
 )
 from backend.dust_detector import dust_detector
+from backend.model_trainer import model_trainer
 from backend.esp32_controller import esp32_controller
 from backend.monitoring_service import monitoring_service
 
@@ -208,18 +211,37 @@ def connect_ip_webcam():
     normalized_url, cam_type = normalize_camera_source(target)
 
     # Fast probe to check if mobile IP Webcam responds
-    reachable, probe_msg, details = probe_ip_webcam(normalized_url, timeout=2.5)
+    reachable, probe_msg, details = probe_ip_webcam(normalized_url, timeout=2.0)
 
-    # Switch camera stream
+    if not reachable:
+        diag = get_network_diagnostics()
+        gw = diag.get("gateway_ip")
+        ssid = diag.get("ssid")
+        tip = f" (Tip: Connected to Wi-Fi '{ssid}'. On phone hotspot, camera IP is http://{gw}:8080)" if gw else ""
+        error_msg = f"{probe_msg}{tip}"
+        Database.log_system_event("WARNING", "CAMERA", f"Mobile IP Webcam connection failed: {normalized_url} - {probe_msg}")
+        return jsonify({
+            "success": False,
+            "reachable": False,
+            "error": error_msg,
+            "message": error_msg,
+            "url": normalized_url,
+            "diagnostics": diag
+        }), 400
+
+    # Switch camera stream to verified working URL
     camera_manager.stop()
-    started = camera_manager.start(camera_source=normalized_url)
-    Database.log_system_event("INFO", "CAMERA", f"Mobile IP Webcam connection to {normalized_url} (Reachable: {reachable})")
+    working_url = details.get("url", normalized_url)
+    started = camera_manager.start(camera_source=working_url)
+    Database.set_setting("ip_webcam_url", working_url)
+    Database.set_setting("camera_source", working_url)
+    Database.log_system_event("INFO", "CAMERA", f"Mobile IP Webcam connected to {working_url}")
 
     return jsonify({
         "success": started,
-        "reachable": reachable,
-        "message": probe_msg if reachable else f"Connected: {probe_msg}",
-        "url": normalized_url,
+        "reachable": True,
+        "message": probe_msg,
+        "url": working_url,
         "details": details,
         "camera": camera_manager.get_status()
     })
@@ -239,12 +261,35 @@ def test_ip_webcam():
     target = raw_url.strip() if raw_url else f"{str(ip).strip()}:{port}"
     normalized_url, cam_type = normalize_camera_source(target)
 
-    reachable, probe_msg, details = probe_ip_webcam(normalized_url, timeout=2.5)
+    reachable, probe_msg, details = probe_ip_webcam(normalized_url, timeout=2.0)
     return jsonify({
         "success": reachable,
         "message": probe_msg,
-        "url": normalized_url,
+        "url": details.get("url", normalized_url),
         "details": details
+    })
+
+
+@app.route("/api/camera/ip-webcam/discover", methods=["GET"])
+def discover_ip_webcam():
+    """Scans local network / hotspot for active IP Webcam mobile cameras."""
+    diag = get_network_diagnostics()
+    discovered = scan_for_ip_webcams(timeout=0.4)
+    return jsonify({
+        "success": True,
+        "diagnostics": diag,
+        "discovered": discovered,
+        "suggested_url": diag.get("suggested_url", "http://10.89.28.44:8080")
+    })
+
+
+@app.route("/api/camera/ip-webcam/diagnostics", methods=["GET"])
+def get_ip_webcam_diagnostics():
+    """Returns network diagnostics, hotspot status, and gateway IP suggestions."""
+    diag = get_network_diagnostics()
+    return jsonify({
+        "success": True,
+        "diagnostics": diag
     })
 
 
@@ -353,6 +398,22 @@ def upload_reference():
         return jsonify({"success": False, "error": "Validation error: Invalid base64 image data."}), 400
 
     return jsonify({"success": False, "error": "Validation error: No file or image_base64 provided."}), 400
+
+
+# ---------------------------------------------------------
+# Model Training & Calibration APIs
+# ---------------------------------------------------------
+@app.route("/api/model/status", methods=["GET"])
+def get_model_status():
+    """Returns the current trained model state, accuracy, and dataset sample counts."""
+    return jsonify({"success": True, "model": model_trainer.get_model_status()})
+
+
+@app.route("/api/model/train", methods=["POST"])
+def train_model():
+    """Executes model training & calibration on the Chittoria solar panel dataset."""
+    result = model_trainer.train_and_calibrate()
+    return jsonify(result)
 
 
 # ---------------------------------------------------------
