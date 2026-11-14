@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SolarGuard AI – Intelligent Solar Panel Dust Detection & Alert System</title>
+
+  <!-- Typography: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Chart.js 4.x CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <!-- Custom Industrial Theme CSS -->
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<div class="app-wrapper">
+
+  <!-- SIDEBAR NAVIGATION -->
+  <aside class="sidebar">
+    <div class="brand-section">
+      <div class="brand-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="4"></circle>
+          <path d="M12 2v2"></path>
+          <path d="M12 20v2"></path>
+          <path d="m4.93 4.93 1.41 1.41"></path>
+          <path d="m17.66 17.66 1.41 1.41"></path>
+          <path d="M2 12h2"></path>
+          <path d="M20 12h2"></path>
+          <path d="m6.34 17.66-1.41 1.41"></path>
+          <path d="m19.07 4.93-1.41 1.41"></path>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-title">SolarGuard AI</div>
+        <span class="brand-badge">IoT Core v1.0</span>
+      </div>
+    </div>
+
+    <ul class="nav-links">
+      <li class="nav-item active">
+        <a href="#overview">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect width="7" height="9" x="3" y="3" rx="1"></rect>
+            <rect width="7" height="5" x="14" y="3" rx="1"></rect>
+            <rect width="7" height="9" x="14" y="12" rx="1"></rect>
+            <rect width="7" height="5" x="3" y="16" rx="1"></rect>
+          </svg>
+          Dashboard Overview
+        </a>
+      </li>
+      <li class="nav-item">
+        <a href="#live-monitoring">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m22 8-6 4 6 4V8Z"></path>
+            <rect width="14" height="12" x="2" y="6" rx="2" ry="2"></rect>
+          </svg>
+          Live Vision Stream
+        </a>
+      </li>
+      <li class="nav-item">
+        <a href="#analytics">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 3v18h18"></path>
+            <path d="m19 9-5 5-4-4-3 3"></path>
+          </svg>
+          Soiling Analytics
+        </a>
+      </li>
+      <li class="nav-item">
+        <a href="#esp32-control">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h.01"></path>
+            <path d="M2 8.82a15 15 0 0 1 20 0"></path>
+            <path d="M5 12.859a10 10 0 0 1 14 0"></path>
+            <path d="M8.5 16.429a5 5 0 0 1 7 0"></path>
+          </svg>
+          ESP32 Wi-Fi Node
+        </a>
+      </li>
+      <li class="nav-item">
+        <a href="#system-logs">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" x2="20" y1="19" y2="19"></line>
+          </svg>
+          System Telemetry
+        </a>
+      </li>
+    </ul>
+
+    <!-- Sidebar Mini Info -->
+    <div class="sidebar-hardware-box">
+      <div class="sidebar-hardware-title">Hardware Profile</div>
+      <div class="status-indicator-row">
+        <span>Vision Camera</span>
+        <span id="sideCamIndicator" style="color:var(--teal-primary);">USB / Virtual</span>
+      </div>
+      <div class="status-indicator-row">
+        <span>Microcontroller</span>
+        <span style="color:var(--cyan-accent);">ESP32 DevKit</span>
+      </div>
+      <div class="status-indicator-row">
+        <span>Red Alert LED</span>
+        <span style="color:var(--crimson-dusty);">GPIO 25</span>
+      </div>
+      <div class="status-indicator-row">
+        <span>Green Clean LED</span>
+        <span style="color:var(--emerald-clean);">GPIO 26</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN VIEWPORT -->
+  <main class="main-content">
+
+    <!-- TOP HEADER -->
+    <header class="top-header">
+      <div class="header-title-box">
+        <h1>Industrial Solar Panel Monitoring</h1>
+        <p>Continuous Computer Vision Dust Analysis & Automatic Hardware Synchronization</p>
+      </div>
+      <div class="header-actions">
+        <div class="status-pill" id="topCameraStatus">
+          <span class="pulse-dot"></span> Camera Initializing
+        </div>
+        <div class="status-pill" id="topEspStatus">
+          <span class="pulse-dot dusty"></span> ESP32 Offline
+        </div>
+        <div class="status-pill" id="topModeStatus">
+          Mode: AUTO
+        </div>
+        <button class="btn-solarguard btn-dark btn-sm" id="btnOpenSettings">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+            <circle cx="12" cy="12" r="3"></circle>
+          </svg>
+          Calibration
+        </button>
+      </div>
+    </header>
+
+    <!-- TEST GENERATOR BANNER (Appears when in simulation/virtual mode) -->
+    <div class="simulation-banner" id="simBanner" style="display:none;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" x2="12" y1="8" y2="12"></line>
+          <line x1="12" x2="12.01" y1="16" y2="16"></line>
+        </svg>
+        <span><strong>Virtual Test Mode:</strong> Running synthetic solar panel feed (No physical camera required). Adjust simulated dust slider to verify detection & ESP32 triggers:</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <span id="simDustVal" style="font-family:var(--font-mono); font-weight:700; color:var(--amber-moderate);">0%</span>
+        <input type="range" id="simDustSlider" min="0" max="100" value="0" style="width:140px; cursor:pointer;">
+      </div>
+    </div>
+
+    <!-- OVERVIEW KPI STAT CARDS -->
+    <section class="kpi-grid" id="overview">
+      <!-- Card 1: Condition Status -->
+      <div class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-label">Current Condition</span>
+          <div class="kpi-icon-circle">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+              <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+          </div>
+        </div>
+        <div class="kpi-value" id="kpiCondition">
+          <span class="badge-condition clean">PANEL CLEAN</span>
+        </div>
+        <div class="kpi-footer">
+          <span>Continuous Debounced State</span>
+        </div>
+      </div>
+
+      <!-- Card 2: Visual Soiling Index -->
+      <div class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-label">Visual Soiling Index</span>
+          <div class="kpi-icon-circle">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2v20"></path>
+              <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+            </svg>
+          </div>
+        </div>
+        <div class="kpi-value" id="kpiSoiling" style="color:var(--teal-primary);">
+          0.0%
+        </div>
+        <div class="kpi-footer">
+          <span>SSIM & Texture Degradation Score</span>
+        </div>
+      </div>
+
+      <!-- Card 3: Detection Confidence -->
+      <div class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-label">Analysis Confidence</span>
+          <div class="kpi-icon-circle">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="m16 12-4-4-4 4"></path>
+              <path d="M12 16V8"></path>
+            </svg>
+          </div>
+        </div>
+        <div class="kpi-value" id="kpiConfidence">
+          95%
+        </div>
+        <div class="kpi-footer">
+          <span>Lighting & Metric Consistency</span>
+        </div>
+      </div>
+
+      <!-- Card 4: Total Scans -->
+      <div class="kpi-card">
+        <div class="kpi-header">
+          <span class="kpi-label">Scans Completed</span>
+          <div class="kpi-icon-circle">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"></path>
+            </svg>
+          </div>
+        </div>
+        <div class="kpi-value" id="kpiScans">
+          0
+        </div>
+        <div class="kpi-footer">
+          <span>Uptime: <strong id="kpiUptime" style="color:var(--text-main); margin-left:4px;">00:00:00</strong></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- MAIN TWO-COLUMN DASHBOARD GRID -->
+    <div class="dashboard-grid">
+
+      <!-- LEFT COLUMN: LIVE VIDEO STREAM & CONTROLS -->
+      <div class="grid-column-left">
+        <div class="content-card" id="live-monitoring">
+          <div class="content-card-header">
+            <div class="card-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m22 8-6 4 6 4V8Z"></path>
+                <rect width="14" height="12" x="2" y="6" rx="2" ry="2"></rect>
+              </svg>
+              Live Camera Stream & OpenCV Target Analysis
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <select id="cameraDeviceSelect" class="form-control-custom" style="width:190px; padding:4px 8px; font-size:12px;">
+                <option value="0">Camera 0 (Default)</option>
+              </select>
+              <button class="btn-solarguard btn-dark btn-sm" id="btnToggleMobileCamPanel" title="Configure Mobile Phone IP Webcam" style="display:flex; align-items:center; gap:5px; white-space:nowrap;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect width="14" height="20" x="5" y="2" rx="2" ry="2"></rect>
+                  <path d="M12 18h.01"></path>
+                </svg>
+                <span>Mobile IP Cam</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="content-card-body">
+            <!-- MOBILE IP WEBCAM CONFIGURATION PANEL -->
+            <div class="mobile-cam-panel" id="mobileCamPanel" style="display:none; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:8px; padding:12px; margin-bottom:12px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div style="font-size:13px; font-weight:600; display:flex; align-items:center; gap:6px; color:var(--text-main);">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect width="14" height="20" x="5" y="2" rx="2" ry="2"></rect>
+                    <path d="M12 18h.01"></path>
+                  </svg>
+                  Connect Mobile Phone (Android IP Webcam)
+                </div>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <span id="mobileCamBadge" style="font-size:11px; padding:2px 8px; border-radius:12px; background:rgba(100,116,139,0.2); color:var(--text-dim); border:1px solid var(--border-color);">
+                    Not Connected
+                  </span>
+                  <button type="button" id="btnCloseMobileCamPanel" style="background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:16px;">&times;</button>
+                </div>
+              </div>
+
+              <!-- Quick IP input row -->
+              <div style="display:grid; grid-template-columns: 1fr auto auto; gap:8px; align-items:center;">
+                <div>
+                  <input type="text" id="inputMobileIpUrl" class="form-control-custom" placeholder="e.g. 192.168.1.100:8080 or http://192.168.1.100:8080/video" style="font-size:12px; font-family:var(--font-mono);">
+                </div>
+                <button class="btn-solarguard btn-dark btn-sm" id="btnTestIpCam" style="white-space:nowrap;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polyline points="12 6 12 12 16 14"></polyline>
+                  </svg>
+                  Test Ping
+                </button>
+                <button class="btn-solarguard btn-teal btn-sm" id="btnConnectIpCam" style="white-space:nowrap;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 12h14"></path>
+                    <path d="m12 5 7 7-7 7"></path>
+                  </svg>
+                  Connect Phone
+                </button>
+              </div>
+
+              <!-- Mobile Remote Controls (Torch, Flip Camera, Focus) -->
+              <div id="mobileCamControls" style="display:none; margin-top:10px; padding-top:8px; border-top:1px dashed var(--border-color); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+                <div style="font-size:11px; color:var(--text-muted);">
+                  📱 Active Phone Stream: <span id="mobileCamActiveUrl" style="color:var(--teal-primary); font-family:var(--font-mono);"></span>
+                </div>
+                <div style="display:flex; gap:6px;">
+                  <button class="btn-solarguard btn-dark btn-sm" id="btnToggleTorch" title="Turn mobile phone flashlight ON/OFF">
+                    🔦 <span id="lblTorchText">Torch ON</span>
+                  </button>
+                  <button class="btn-solarguard btn-dark btn-sm" id="btnFlipCamera" title="Flip between front and rear mobile camera">
+                    🔄 <span id="lblCameraFacing">Flip Front/Rear</span>
+                  </button>
+                  <button class="btn-solarguard btn-dark btn-sm" id="btnTriggerFocus" title="Trigger mobile autofocus">
+                    🎯 Focus
+                  </button>
+                </div>
+              </div>
+
+              <!-- Quick Setup Help Text -->
+              <div style="margin-top:8px; font-size:11px; color:var(--text-dim); line-height:1.4;">
+                💡 <strong>How to connect:</strong>
+                1. Install <em>IP Webcam</em> from Google Play Store on your mobile &bull;
+                2. Tap <em>Start server</em> at bottom of app &bull;
+                3. Enter the IP shown on phone screen (e.g., <code>192.168.1.100:8080</code>) above &bull;
+                4. Click <strong>Connect Phone</strong>.
+              </div>
+            </div>
+
+            <!-- Video Player Window -->
+            <div class="video-stream-wrapper">
+              <img src="/video_feed" id="liveVideoFeed" class="video-stream-img" alt="Solar Panel Live Stream">
+            </div>
+
+            <!-- Video & Monitoring Action Bar -->
+            <div class="video-controls-bar">
+              <div class="btn-group-custom">
+                <button class="btn-solarguard btn-teal" id="btnStartMonitoring">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                  </svg>
+                  Start Monitoring
+                </button>
+                <button class="btn-solarguard btn-danger" id="btnStopMonitoring">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <rect width="14" height="14" x="5" y="5" rx="2"></rect>
+                  </svg>
+                  Stop Monitoring
+                </button>
+                <button class="btn-solarguard btn-dark" id="btnSingleScan">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M3 7V5a2 2 0 0 1 2-2h2"></path>
+                    <path d="M17 3h2a2 2 0 0 1 2 2v2"></path>
+                    <path d="M21 17v2a2 2 0 0 1-2 2h-2"></path>
+                    <path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>
+                  </svg>
+                  Instant Scan
+                </button>
+              </div>
+
+              <div class="btn-group-custom">
+                <button class="btn-solarguard btn-dark btn-sm" id="btnStartCamera">Start Cam</button>
+                <button class="btn-solarguard btn-dark btn-sm" id="btnStopCamera">Stop Cam</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SOILING TREND CHART -->
+        <div class="content-card" id="analytics">
+          <div class="content-card-header">
+            <div class="card-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 3v18h18"></path>
+                <path d="m19 9-5 5-4-4-3 3"></path>
+              </svg>
+              Visual Soiling Index Trend (%)
+            </div>
+            <span style="font-size:12px; color:var(--text-muted);">Real-time Telemetry Buffer</span>
+          </div>
+          <div class="content-card-body" style="height:280px; position:relative;">
+            <canvas id="soilingTrendCanvas"></canvas>
+          </div>
+        </div>
+
+        <!-- RECENT DETECTION HISTORY TABLE -->
+        <div class="content-card">
+          <div class="content-card-header">
+            <div class="card-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
+              </svg>
+              Detection Event Records
+            </div>
+            <button class="btn-solarguard btn-dark btn-sm" id="btnExportCsv">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" x2="12" y1="15" y2="3"></line>
+              </svg>
+              Export CSV
+            </button>
+          </div>
+          <div class="content-card-body" style="padding:0;">
+            <div class="table-responsive">
+              <table class="custom-table">
+                <thead>
+                  <tr>
+                    <th>Scan #</th>
+                    <th>Time</th>
+                    <th>Condition</th>
+                    <th>Soiling Index</th>
+                    <th>Confidence</th>
+                    <th>ESP32 Action</th>
+                  </tr>
+                </thead>
+                <tbody id="historyTableBody">
+                  <tr>
+                    <td colspan="6" style="text-align:center; color:var(--text-dim);">Loading historical records...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT COLUMN: ESP32 HARDWARE, CLEAN REFERENCE, CONDITION DISTRIBUTION & LOGS -->
+      <div class="grid-column-right">
+
+        <!-- ESP32 HARDWARE CONTROL CARD -->
+        <div class="content-card" id="esp32-control">
+          <div class="content-card-header">
+            <div class="card-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect width="18" height="14" x="3" y="5" rx="2"></rect>
+                <line x1="7" x2="7" y1="19" y2="21"></line>
+                <line x1="17" x2="17" y1="19" y2="21"></line>
+              </svg>
+              ESP32 Wi-Fi Node Controller
+            </div>
+            <div id="espStatusBadge" class="status-pill">
+              <span class="pulse-dot dusty"></span> DISCONNECTED
+            </div>
+          </div>
+
+          <div class="content-card-body">
+            <!-- IP Configuration Input -->
+            <div style="display:flex; gap:8px; margin-bottom:14px;">
+              <input type="text" id="espIpInput" class="form-control-custom" placeholder="e.g. 192.168.1.150" value="192.168.1.150">
+              <button class="btn-solarguard btn-teal" id="btnEspConnect" style="white-space:nowrap;">
+                Ping / Connect
+              </button>
+            </div>
+
+            <!-- ESP32 Hardware Status Summary -->
+            <div class="esp-hardware-card">
+              <div class="status-indicator-row">
+                <span style="color:var(--text-muted);">Target IP:</span>
+                <span id="espIpDisplay" style="font-family:var(--font-mono); font-weight:600;">192.168.1.150</span>
+              </div>
+              <div class="status-indicator-row">
+                <span style="color:var(--text-muted);">Latency:</span>
+                <span id="espLatencyDisplay" style="font-family:var(--font-mono); color:var(--teal-primary);">N/A</span>
+              </div>
+              <div class="status-indicator-row" style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.06); padding-top:8px;">
+                <span style="color:var(--text-muted);">Auto Sync on Detection:</span>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="autoModeToggle" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Dual LED Visualizer Panel -->
+            <div class="led-visual-panel">
+              <!-- RED LED BOX -->
+              <div class="led-box">
+                <div class="led-bulb" id="ledRedBulb"></div>
+                <div class="led-label">Red Alert LED (GPIO 25)</div>
+                <div style="display:flex; gap:6px;">
+                  <button class="btn-solarguard btn-dark btn-sm" id="btnTestRedOn">ON</button>
+                  <button class="btn-solarguard btn-dark btn-sm" id="btnTestRedOff">OFF</button>
+                </div>
+              </div>
+
+              <!-- GREEN LED BOX -->
+              <div class="led-box">
+                <div class="led-bulb" id="ledGreenBulb"></div>
+                <div class="led-label">Green Clean LED (GPIO 26)</div>
+                <div style="display:flex; gap:6px;">
+                  <button class="btn-solarguard btn-dark btn-sm" id="btnTestGreenOn">ON</button>
+                  <button class="btn-solarguard btn-dark btn-sm" id="btnTestGreenOff">OFF</button>
+                </div>
+              </div>
+            </div>
+
+            <p style="font-size:11px; color:var(--text-dim); text-align:center;">
+              * Auto mode updates GPIO 25/26 via HTTP when panel condition transitions.
+            </p>
+          </div>
+        </div>
+
+        <!-- CLEAN REFERENCE IMAGE MANAGEMENT -->
+        <div class="content-card">
+          <div class="content-card-header">
+            <div class="card-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect>
+                <circle cx="9" cy="9" r="2"></circle>
+                <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path>
+              </svg>
+              Clean Reference Image
+            </div>
+            <span style="font-size:11px; color:var(--text-dim);">clean_reference.jpg</span>
+          </div>
+
+          <div class="content-card-body">
+            <!-- Thumbnail Preview -->
+            <div class="reference-preview-box">
+              <img id="referencePreviewImg" src="/api/reference/view?raw=1" alt="Clean Reference">
+            </div>
+
+            <div style="display:flex; gap:8px;">
+              <button class="btn-solarguard btn-teal" id="btnCaptureReference" style="flex:1; justify-content:center;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                  <circle cx="12" cy="13" r="4"></circle>
+                </svg>
+                Capture Current Frame
+              </button>
+              <label class="btn-solarguard btn-dark" style="cursor:pointer; margin-bottom:0;">
+                Upload
+                <input type="file" id="refFileInput" accept="image/*" style="display:none;">
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- CONDITION DISTRIBUTION DOUGHNUT CHART -->
+        <div class="content-card">
+          <div class="content-card-header">
+            <div class="card-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M12 2a10 10 0 0 1 10 10h-10z"></path>
+              </svg>
+              Condition History Distribution
+            </div>
+          </div>
+          <div class="content-card-body" style="height:210px; position:relative;">
+            <canvas id="conditionDoughnutCanvas"></canvas>
+          </div>
+        </div>
+
+        <!-- REAL-TIME SYSTEM LOG TERMINAL -->
+        <div class="content-card" id="system-logs">
+          <div class="content-card-header">
+            <div class="card-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="4 17 10 11 4 5"></polyline>
+                <line x1="12" x2="20" y1="19" y2="19"></line>
+              </svg>
+              Live System Telemetry Console
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <label style="font-size:11px; color:var(--text-muted); display:flex; align-items:center; gap:4px; cursor:pointer;">
+                <input type="checkbox" id="chkAutoScroll" checked> Auto-scroll
+              </label>
+              <button class="btn-solarguard btn-dark btn-sm" id="btnClearLogs">Clear</button>
+            </div>
+          </div>
+
+          <div class="content-card-body" style="padding:10px;">
+            <div class="log-terminal" id="logTerminal">
+              <div class="log-entry">
+                <span class="log-time">[Init]</span>
+                <span class="log-level-INFO">[SYSTEM]</span>
+                <span class="log-msg">SolarGuard AI Console ready. Polling telemetry...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- THRESHOLD & CALIBRATION MODAL -->
+<div class="modal-overlay" id="modalSettings">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="card-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+        Detection Calibration & Settings
+      </div>
+      <button id="btnCloseSettings" style="background:none; border:none; color:var(--text-dim); font-size:20px; cursor:pointer;">&times;</button>
+    </div>
+
+    <div class="modal-body">
+      <!-- Clean Threshold Slider -->
+      <div style="margin-bottom:18px;">
+        <label style="display:flex; justify-content:space-between; font-size:13px; font-weight:600; margin-bottom:6px;">
+          <span>Clean Panel Threshold (%)</span>
+          <span id="lblCleanThreshold" style="color:var(--emerald-clean); font-family:var(--font-mono);">22.0%</span>
+        </label>
+        <p style="font-size:12px; color:var(--text-dim); margin-bottom:8px;">
+          Soiling index below this value is classified as <strong>CLEAN</strong>.
+        </p>
+        <input type="range" id="settingCleanThreshold" min="5" max="50" step="0.5" value="22" style="width:100%; cursor:pointer;" oninput="document.getElementById('lblCleanThreshold').textContent=this.value+'%'">
+      </div>
+
+      <!-- Heavy Threshold Slider -->
+      <div style="margin-bottom:18px;">
+        <label style="display:flex; justify-content:space-between; font-size:13px; font-weight:600; margin-bottom:6px;">
+          <span>Heavily Dusty Alert Threshold (%)</span>
+          <span id="lblHeavyThreshold" style="color:var(--crimson-dusty); font-family:var(--font-mono);">48.0%</span>
+        </label>
+        <p style="font-size:12px; color:var(--text-dim); margin-bottom:8px;">
+          Soiling index above this value is classified as <strong>HEAVILY DUSTY</strong> (Triggers ESP32 Red Alert LED).
+        </p>
+        <input type="range" id="settingHeavyThreshold" min="30" max="85" step="0.5" value="48" style="width:100%; cursor:pointer;" oninput="document.getElementById('lblHeavyThreshold').textContent=this.value+'%'">
+      </div>
+
+      <!-- Hardware Simulation Mode Toggle -->
+      <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--border-color); padding-top:16px;">
+        <div>
+          <div style="font-size:13px; font-weight:600;">Enable Hardware Simulation Mode</div>
+          <p style="font-size:11px; color:var(--text-dim);">Use built-in synthetic solar test generator if physical camera is detached.</p>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="simToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn-solarguard btn-dark" onclick="document.getElementById('modalSettings').classList.remove('active')">Cancel</button>
+      <button class="btn-solarguard btn-teal" id="btnSaveSettings">Save Calibration</button>
+    </div>
+  </div>
+</div>
+
+<!-- SCRIPTS -->
+<script src="/static/js/charts.js"></script>
+<script src="/static/js/dashboard.js"></script>
+
+</body>
+</html>
