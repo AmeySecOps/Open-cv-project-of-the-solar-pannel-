@@ -506,54 +506,44 @@ class CameraManager:
                         self.cap = None
 
                 if not self.simulation_mode:
-                    capture_endpoint = self.stream_url if (self.is_ip_camera and self.stream_url) else self.camera_source
-                    self.cap = cv2.VideoCapture(capture_endpoint)
+                    if self.is_ip_camera:
+                        # For IP Webcam, fetch initial frame via HTTP without invoking crash-prone FFmpeg demuxer
+                        try:
+                            resp = requests.get(self.snapshot_url, timeout=2.0, verify=False)
+                            if resp.status_code == 200 and resp.content:
+                                arr = np.frombuffer(resp.content, np.uint8)
+                                self.latest_frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                        except Exception:
+                            pass
+                        self.cap = None
+                    else:
+                        # Physical USB Webcam (DirectShow backend)
+                        self.cap = cv2.VideoCapture(self.camera_source)
 
-                    if not self.cap.isOpened():
-                        # Before falling back to simulation, check if snapshot mode works
-                        if self.is_ip_camera and self.snapshot_url:
-                            ok, _, _ = probe_ip_webcam(self.snapshot_url, timeout=1.5)
-                            if ok:
-                                self.is_snapshot_mode = True
-                                self.simulation_mode = False
-                                self.cap = None
-                                logger.info(f"Stream endpoint failed, but snapshot endpoint is available. Using snapshot feed: {self.snapshot_url}")
-
-                        if not self.is_snapshot_mode:
-                            msg = (
-                                f"Could not connect to Mobile IP Webcam at {self.camera_source}. Ensure 'Start server' is running in IP Webcam on your phone and on same Wi-Fi."
-                                if self.is_ip_camera else
-                                f"Could not open physical camera device {self.camera_source}."
-                            )
+                        if not self.cap.isOpened():
+                            msg = f"Could not open physical camera device {self.camera_source}."
                             logger.warning(f"{msg} Falling back to virtual simulation generator.")
                             self.error_message = msg
                             self.simulation_mode = True
                             self.cap = None
-                    else:
-                        self.simulation_mode = False
-                        self.is_snapshot_mode = False
-                        # Minimize buffer lag for live network streams
-                        try:
-                            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                        except Exception:
-                            pass
-                        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-                        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-                        self.cap.set(cv2.CAP_PROP_FPS, self.fps_target)
-
-                        # Verify read
-                        ret, test_frame = self.cap.read()
-                        if not ret or test_frame is None:
-                            logger.warning("Camera opened but failed to capture initial frame.")
-                            if self.is_ip_camera and self.snapshot_url:
-                                self.is_snapshot_mode = True
-                                self.simulation_mode = False
-                            else:
-                                self.simulation_mode = True
-                            self.cap.release()
-                            self.cap = None
                         else:
-                            self.latest_frame = test_frame
+                            self.simulation_mode = False
+                            try:
+                                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                            except Exception:
+                                pass
+                            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                            self.cap.set(cv2.CAP_PROP_FPS, self.fps_target)
+
+                            ret, test_frame = self.cap.read()
+                            if not ret or test_frame is None:
+                                logger.warning("Camera opened but failed to capture initial frame.")
+                                self.simulation_mode = True
+                                self.cap.release()
+                                self.cap = None
+                            else:
+                                self.latest_frame = test_frame
 
                 self.is_running = True
                 self.thread = threading.Thread(target=self._capture_loop, daemon=True, name="CameraCaptureWorker")
@@ -573,17 +563,19 @@ class CameraManager:
         """Stops the camera capture thread and releases hardware resources."""
         with self.lock:
             self.is_running = False
+            cap_to_release = self.cap
+            self.cap = None
+
+        if cap_to_release is not None:
+            try:
+                cap_to_release.release()
+            except Exception as e:
+                logger.error(f"Error releasing camera: {e}")
 
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=2.0)
 
         with self.lock:
-            if self.cap is not None:
-                try:
-                    self.cap.release()
-                except Exception as e:
-                    logger.error(f"Error releasing camera: {e}")
-                self.cap = None
             self.annotated_frame = None
             logger.info("Camera stream stopped.")
 
@@ -592,7 +584,7 @@ class CameraManager:
         prev_time = time.time()
         consecutive_failures = 0
         last_reconnect_attempt = 0.0
-        reconnect_interval = 3.0
+        reconnect_interval = 2.0
         session = requests.Session()
         session.trust_env = False
 
@@ -601,20 +593,11 @@ class CameraManager:
 
             if not self.simulation_mode:
                 frame = None
-                # 1. Attempt read from cv2.VideoCapture stream
-                if self.cap is not None:
-                    try:
-                        if self.cap.isOpened():
-                            ret, cap_frame = self.cap.read()
-                            if ret and cap_frame is not None and cap_frame.size > 0:
-                                frame = cap_frame
-                    except Exception as e:
-                        logger.debug(f"Frame read exception: {e}")
 
-                # 2. Seamless fallback to HTTP snapshot polling if cv2.VideoCapture drops or fails on IP camera
-                if frame is None and self.is_ip_camera and self.snapshot_url:
+                # Case 1: Mobile IP Webcam stream via HTTP
+                if self.is_ip_camera and self.snapshot_url:
                     try:
-                        resp = session.get(self.snapshot_url, timeout=0.8, verify=False)
+                        resp = session.get(self.snapshot_url, timeout=1.2, verify=False)
                         if resp.status_code == 200 and resp.content:
                             arr = np.frombuffer(resp.content, np.uint8)
                             s_frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -622,6 +605,16 @@ class CameraManager:
                                 frame = s_frame
                     except Exception:
                         pass
+
+                # Case 2: Physical USB Webcam (DirectShow)
+                elif self.cap is not None:
+                    try:
+                        if self.cap.isOpened():
+                            ret, cap_frame = self.cap.read()
+                            if ret and cap_frame is not None and cap_frame.size > 0:
+                                frame = cap_frame
+                    except Exception as e:
+                        logger.debug(f"Frame read exception: {e}")
 
                 if frame is not None and frame.size > 0:
                     consecutive_failures = 0
@@ -634,34 +627,32 @@ class CameraManager:
                 else:
                     consecutive_failures += 1
 
-                # Automatic reconnection for IP Webcam network streams
-                if self.is_ip_camera and consecutive_failures >= 15:
+                # Auto-recovery for IP Webcam network streams
+                if self.is_ip_camera and consecutive_failures >= 10:
                     now = time.time()
                     if now - last_reconnect_attempt >= reconnect_interval:
                         last_reconnect_attempt = now
-                        logger.warning(f"IP camera stream stalled ({consecutive_failures} failures). Reconnecting to {self.camera_source}...")
-                        try:
-                            if self.cap is not None:
-                                self.cap.release()
-                        except Exception:
-                            pass
-                        try:
-                            reconnect_endpoint = self.stream_url if (self.is_ip_camera and self.stream_url) else self.camera_source
-                            new_cap = cv2.VideoCapture(reconnect_endpoint)
-                            if new_cap.isOpened():
-                                try:
-                                    new_cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                                except Exception:
-                                    pass
-                                self.cap = new_cap
-                                consecutive_failures = 0
-                                logger.info(f"Successfully reconnected to IP camera: {self.camera_source}")
-                            else:
-                                self.cap = None
-                        except Exception as re_err:
-                            logger.debug(f"Stream reconnection failed: {re_err}")
+                        ok, _, _ = probe_ip_webcam(str(self.camera_source), timeout=1.0)
+                        if not ok:
+                            logger.warning(f"IP camera stream lost ({consecutive_failures} failures). Temporarily running virtual simulation generator until phone reconnects.")
+                            with self.lock:
+                                self.simulation_mode = True
+                        else:
+                            consecutive_failures = 0
             else:
                 # Simulation mode generator
+                # Periodically probe if mobile phone came back online
+                if self.is_ip_camera:
+                    now = time.time()
+                    if now - last_reconnect_attempt >= 4.0:
+                        last_reconnect_attempt = now
+                        ok, _, _ = probe_ip_webcam(str(self.camera_source), timeout=1.0)
+                        if ok:
+                            logger.info(f"Mobile IP Webcam at {self.camera_source} came back online! Restoring real camera stream.")
+                            with self.lock:
+                                self.simulation_mode = False
+                                consecutive_failures = 0
+
                 with self.lock:
                     self.latest_frame = self._generate_synthetic_solar_frame(self.simulated_dust_level)
                     self.frame_count += 1

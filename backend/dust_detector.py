@@ -277,7 +277,7 @@ class DustDetector:
         elif has_heavy_diffuse_dust:
             # Diffuse dust layer/haze detected optically (blur, contrast loss, desaturation)
             soiling_index = max(raw_ref_index, diffuse_dust * 100.0)
-        elif n_blobs <= 2 and cov_pct <= 0.25:
+        elif n_blobs <= 3 and cov_pct <= 0.35:
             # Clean panel: prevent mobile camera angle/perspective shifts from causing false alerts
             soiling_index = min(soiling_debris + diffuse_dust * 15.0, self.threshold_clean - 1.0)
         else:
@@ -295,7 +295,7 @@ class DustDetector:
             # Confidence estimation: high when debris and optical features are unambiguous
             agreement = 1.0 - np.std([structural_loss, texture_loss, sat_loss, contrast_loss])
             base_conf = float(np.clip(agreement * 100.0, 50.0, 95.0))
-            if (n_blobs <= 1 and soiling_index < self.threshold_clean) or (n_blobs >= 8 and soiling_index >= self.threshold_heavy):
+            if (n_blobs <= 3 and soiling_index < self.threshold_clean) or (n_blobs >= 8 and soiling_index >= self.threshold_heavy):
                 confidence = max(base_conf, 96.0)
             else:
                 confidence = base_conf

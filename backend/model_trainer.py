@@ -70,8 +70,9 @@ class ModelTrainer:
     @staticmethod
     def detect_debris_blobs(cells: np.ndarray) -> Tuple[int, float, float, List[Dict[str, Any]]]:
         """
-        Segments foreign debris (paper scraps, dust clumps, droppings) on dark solar cells.
-        Filters out legitimate structural elements (vertical busbars and horizontal gridlines).
+        Segments foreign debris (paper scraps, dust clumps, wire pieces, droppings) on dark solar cells.
+        Combines luminance thresholding with chromatic anomaly segmentation in HSV space.
+        Filters out legitimate structural elements (vertical busbars, horizontal gridlines, frame borders).
         Returns: (n_blobs, total_debris_area, coverage_percentage, list_of_boxes)
         """
         H, W = cells.shape[:2]
@@ -79,25 +80,41 @@ class ModelTrainer:
             return 0, 0.0, 0.0, []
 
         gray = cv2.cvtColor(cells, cv2.COLOR_BGR2GRAY)
+        hsv = cv2.cvtColor(cells, cv2.COLOR_BGR2HSV)
 
-        # Adaptive threshold based on cell wafer median brightness
+        # 1. Luminance mask (white paper scraps, bird droppings, dry dust clumps)
         median_val = float(np.median(gray))
         thresh_val = int(max(150, min(200, median_val + 60)))
-        _, thresh = cv2.threshold(gray, thresh_val, 255, cv2.THRESH_BINARY)
+        _, bright_thresh = cv2.threshold(gray, thresh_val, 255, cv2.THRESH_BINARY)
+        kernel_bright = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+        opened_bright = cv2.morphologyEx(bright_thresh, cv2.MORPH_OPEN, kernel_bright)
 
-        # 7x7 opening kernel removes 1-2px thin grid finger lines completely
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
-        opened = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+        # 2. Chromatic foreign debris mask (red/orange wires, colored debris, leaves)
+        # Photovoltaic cells are dark blue/gray; foreign debris like red/orange wires stand out in HSV
+        mask_red1 = cv2.inRange(hsv, np.array([0, 55, 40]), np.array([22, 255, 255]))
+        mask_red2 = cv2.inRange(hsv, np.array([158, 55, 40]), np.array([180, 255, 255]))
+        mask_yellow = cv2.inRange(hsv, np.array([22, 60, 50]), np.array([85, 255, 255]))
+        chromatic_mask = cv2.bitwise_or(mask_red1, mask_red2)
+        chromatic_mask = cv2.bitwise_or(chromatic_mask, mask_yellow)
+        kernel_chroma = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        opened_chroma = cv2.morphologyEx(chromatic_mask, cv2.MORPH_OPEN, kernel_chroma)
 
-        cnts, _ = cv2.findContours(opened, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Combined multi-channel debris mask
+        combined_mask = cv2.bitwise_or(opened_bright, opened_chroma)
+
+        cnts, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         debris_boxes = []
 
         for c in cnts:
             area = float(cv2.contourArea(c))
-            if area < 60:
+            if area < 50:
                 continue
             x, y, w, h = cv2.boundingRect(c)
             aspect = w / max(1, h)
+
+            # Ignore overall image / giant background contours
+            if area > 0.20 * (H * W):
+                continue
 
             # Filter tall vertical conducting busbars / center dividing bar
             if h > 0.25 * H and aspect < 0.25:
@@ -106,7 +123,9 @@ class ModelTrainer:
             if w > 0.25 * W and aspect > 4.0:
                 continue
             # Filter frame perimeter border attachments
-            if (y <= 3 or y + h >= H - 3) and w > 0.15 * W:
+            if (y <= 5 or y + h >= H - 5) and w > 0.15 * W:
+                continue
+            if (x <= 5 or x + w >= W - 5) and h > 0.15 * H:
                 continue
 
             debris_boxes.append({

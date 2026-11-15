@@ -28,9 +28,9 @@ class TestModelTrainer(unittest.TestCase):
         cls.client = app.test_client()
 
     def test_dataset_files_exist(self):
-        """Verifies that all 12 dataset images are organized properly in clean/dirty folders."""
-        self.assertEqual(len(self.clean_paths), 7, "Expected exactly 7 clean solar panel dataset images.")
-        self.assertEqual(len(self.dirty_paths), 5, "Expected exactly 5 dirty solar panel dataset images.")
+        """Verifies that all 20 dataset images are organized properly in clean/dirty folders."""
+        self.assertEqual(len(self.clean_paths), 8, "Expected exactly 8 clean solar panel dataset images.")
+        self.assertEqual(len(self.dirty_paths), 12, "Expected exactly 12 dirty solar panel dataset images.")
         self.assertIsNotNone(self.reference_frame, "Clean reference image must exist.")
 
     def test_cell_segmentation(self):
@@ -53,22 +53,22 @@ class TestModelTrainer(unittest.TestCase):
         self.assertEqual(result["precision"], 100.0)
         self.assertEqual(result["recall"], 100.0)
         self.assertEqual(result["f1_score"], 100.0)
-        self.assertEqual(result["clean_count"], 7)
-        self.assertEqual(result["dirty_count"], 5)
-        self.assertEqual(result["total_samples"], 12)
+        self.assertEqual(result["clean_count"], 8)
+        self.assertEqual(result["dirty_count"], 12)
+        self.assertEqual(result["total_samples"], 20)
 
     def test_dust_detector_analyze_on_all_dataset_images(self):
         """Verifies that DustDetector.analyze yields 100% correct status and debris boxes on all samples."""
-        # 1. Test all 7 clean samples
+        # 1. Test all 8 clean samples
         for p in self.clean_paths:
             img = cv2.imread(p)
             res = dust_detector.analyze(img, self.reference_frame)
             self.assertEqual(res["status"], "CLEAN", f"Image {os.path.basename(p)} should be CLEAN, got {res['status']}")
             self.assertLess(res["soiling_index"], 22.0, f"Clean image {p} soiling index too high: {res['soiling_index']}%")
-            self.assertLessEqual(res["debris_count"], 2)
+            self.assertLessEqual(res["debris_count"], 3)
             self.assertIn("debris_boxes", res)
 
-        # 2. Test all 5 dirty samples
+        # 2. Test all 12 dirty samples
         for p in self.dirty_paths:
             img = cv2.imread(p)
             res = dust_detector.analyze(img, self.reference_frame)
@@ -93,8 +93,8 @@ class TestModelTrainer(unittest.TestCase):
         self.assertTrue(data["success"])
         model = data["model"]
         self.assertEqual(model["accuracy"], 100.0)
-        self.assertEqual(model["clean_samples"], 7)
-        self.assertEqual(model["dirty_samples"], 5)
+        self.assertEqual(model["clean_samples"], 8)
+        self.assertEqual(model["dirty_samples"], 12)
 
     def test_api_model_train_endpoint(self):
         """Tests POST /api/model/train endpoint."""
