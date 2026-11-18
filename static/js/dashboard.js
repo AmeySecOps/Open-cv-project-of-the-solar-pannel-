@@ -78,6 +78,9 @@ function initUIEventListeners() {
   const btnTestRedOff = document.getElementById('btnTestRedOff');
   const btnTestGreenOn = document.getElementById('btnTestGreenOn');
   const btnTestGreenOff = document.getElementById('btnTestGreenOff');
+  const btnTestServoWipe = document.getElementById('btnTestServoWipe');
+  const btnTestServoZero = document.getElementById('btnTestServoZero');
+  const btnTestServo180 = document.getElementById('btnTestServo180');
   const autoModeToggle = document.getElementById('autoModeToggle');
 
   if (btnEspConnect) btnEspConnect.addEventListener('click', connectEsp32);
@@ -85,6 +88,9 @@ function initUIEventListeners() {
   if (btnTestRedOff) btnTestRedOff.addEventListener('click', () => testEspLed('red', false));
   if (btnTestGreenOn) btnTestGreenOn.addEventListener('click', () => testEspLed('green', true));
   if (btnTestGreenOff) btnTestGreenOff.addEventListener('click', () => testEspLed('green', false));
+  if (btnTestServoWipe) btnTestServoWipe.addEventListener('click', () => testEspServo(null, 'wipe'));
+  if (btnTestServoZero) btnTestServoZero.addEventListener('click', () => testEspServo(0, null));
+  if (btnTestServo180) btnTestServo180.addEventListener('click', () => testEspServo(180, null));
   if (autoModeToggle) autoModeToggle.addEventListener('change', onAutoModeToggled);
 
   // Reference Controls
@@ -263,6 +269,20 @@ function updateDashboardUI(data) {
       ledGreenBulb.classList.add('green-on');
     } else {
       ledGreenBulb.classList.remove('green-on');
+    }
+  }
+
+  // Update Servo Wiper Badge (GPIO 18)
+  const servoAngleBadge = document.getElementById('servoAngleBadge');
+  if (servoAngleBadge && esp.servo) {
+    const sAngle = esp.servo.angle !== undefined ? esp.servo.angle : 0;
+    const sState = esp.servo.wiper_state || 'IDLE_0';
+    if (sAngle > 0 || sState.includes('180') || sState.includes('HOLDING')) {
+      servoAngleBadge.className = 'status-pill status-dusty';
+      servoAngleBadge.textContent = `${sAngle}° (Wiping / 3s Delay)`;
+    } else {
+      servoAngleBadge.className = 'status-pill status-clean';
+      servoAngleBadge.textContent = '0° (Idle / Clean)';
     }
   }
 
@@ -750,6 +770,27 @@ async function testEspLed(led, state) {
     }
   } catch (e) {
     showToast('Failed to send LED test command', true);
+  }
+}
+
+async function testEspServo(angle, action) {
+  try {
+    const payload = {};
+    if (angle !== null && angle !== undefined) payload.angle = angle;
+    if (action) payload.action = action;
+    const resp = await fetch('/api/esp32/test-servo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await resp.json();
+    if (data.success) {
+      showToast(data.message);
+    } else {
+      showToast(`Servo command failed: ${data.message || data.error || 'ESP32 offline'}`, true);
+    }
+  } catch (e) {
+    showToast('Failed to send servo command', true);
   }
 }
 

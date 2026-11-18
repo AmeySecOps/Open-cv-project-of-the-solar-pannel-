@@ -539,8 +539,31 @@
               </div>
             </div>
 
-            <p style="font-size:11px; color:var(--text-dim); text-align:center;">
-              * Auto mode updates GPIO 25/26 via HTTP when panel condition transitions.
+            <!-- Servo Motor Wiper Control Box (GPIO 18) -->
+            <div class="esp-hardware-card" style="margin-top:12px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div style="font-weight:600; font-size:13px; display:flex; align-items:center; gap:6px;">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                  </svg>
+                  Servo Wiper (GPIO 18)
+                </div>
+                <span id="servoAngleBadge" class="status-pill status-clean" style="font-size:11px; padding:2px 8px;">0° (Idle)</span>
+              </div>
+              <div class="status-indicator-row" style="font-size:12px; margin-bottom:8px;">
+                <span style="color:var(--text-muted);">Auto Trigger:</span>
+                <span style="color:var(--gold-warning); font-weight:600;">Dirt &gt; 70% ➔ 0° to 180° (3s delay)</span>
+              </div>
+              <div style="display:flex; gap:6px;">
+                <button class="btn-solarguard btn-dark btn-sm" id="btnTestServoWipe" style="flex:1;">⚡ Wipe</button>
+                <button class="btn-solarguard btn-dark btn-sm" id="btnTestServoZero" style="flex:1;">0° (Clean)</button>
+                <button class="btn-solarguard btn-dark btn-sm" id="btnTestServo180" style="flex:1;">180°</button>
+              </div>
+            </div>
+
+            <p style="font-size:11px; color:var(--text-dim); text-align:center; margin-top:8px;">
+              * Auto mode triggers Servo on GPIO 18 when dirt &gt; 70% (3s delay) and stays at 0° below 70%.
             </p>
           </div>
         </div>

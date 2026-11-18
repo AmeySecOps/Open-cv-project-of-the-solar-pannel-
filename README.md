@@ -82,20 +82,23 @@ When soiling is detected, the Python OpenCV engine calculates a multi-metric vis
 
 ### Required Components:
 1. **ESP32 DevKit Development Board** (ESP32-WROOM-32 or NodeMCU-32S).
-2. **USB Webcam** connected to the computer host.
-3. **Solar Panel** (test cell or full module mounted in a fixed position).
-4. **Red LED** (Indicates DUST DETECTED).
-5. **Green LED** (Indicates PANEL CLEAN).
-6. **2x 220Ω Resistors** (current limiting for LEDs).
-7. **Breadboard & Jumper Wires**.
-8. **Wi-Fi Network** (2.4 GHz) accessible by both the computer and ESP32.
+2. **Servo Motor** (e.g. SG90, MG90S, MG995, MG996R) for solar wiper arm.
+3. **USB Webcam** or Mobile Phone IP Webcam connected to the computer host.
+4. **Solar Panel** (test cell or full module mounted in a fixed position).
+5. **Red LED** (Indicates DUST DETECTED).
+6. **Green LED** (Indicates PANEL CLEAN).
+7. **2x 220Ω Resistors** (current limiting for LEDs).
+8. **Breadboard & Jumper Wires**.
+9. **Wi-Fi Network** (2.4 GHz) accessible by both the computer and ESP32.
 
 ### Wiring Schematic:
 | ESP32 Pin | Component | Series Resistor | Function |
 | :--- | :--- | :--- | :--- |
+| **GPIO 18** | Servo PWM Signal (Orange/Yellow) | Direct | Solar Wiper (0° to 180° on Dirt > 70%, 3s delay; 0° when Clean) |
+| **VIN / 5V** | Servo Power VCC (Red) | Direct | 5V Power Supply (external 5V recommended for high-torque servos) |
 | **GPIO 25** | Red LED Anode (+) | 220Ω | Dust Alert (HIGH = ON) |
 | **GPIO 26** | Green LED Anode (+) | 220Ω | Clean Indicator (HIGH = ON) |
-| **GND** | Both LED Cathodes (-) | Direct | Common Ground |
+| **GND** | LED Cathodes & Servo GND (Brown/Black) | Direct | Common Ground |
 
 > **Note**: Standard ESP32 boards support only 2.4 GHz Wi-Fi networks. Ensure your router or hotspot broadcasts on 2.4 GHz.
 
@@ -105,7 +108,7 @@ When soiling is detected, the Python OpenCV engine calculates a multi-metric vis
 
 * **Backend**: Python 3.10+, OpenCV (`cv2`), NumPy, Flask, Requests, SQLite3, Threading.
 * **Frontend**: Modern HTML5, Responsive Dark Navy CSS3, Vanilla JavaScript (ES6+), Chart.js 4.x.
-* **Microcontroller**: ESP32 C++ (Arduino Core), `WiFi.h`, `WebServer.h`.
+* **Microcontroller**: ESP32 C++ (Arduino Core), `WiFi.h`, `WebServer.h`, `ESP32Servo.h`.
 * **Testing**: Python `unittest` suite (includes hardware simulation mocks).
 
 ---

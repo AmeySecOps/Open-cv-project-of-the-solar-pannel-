@@ -31,6 +31,8 @@ class ESP32Controller:
         # "CLEAN" (Green ON, Red OFF) or "DUSTY" (Red ON, Green OFF)
         self.last_commanded_state: Optional[str] = None
         self.current_led_states = {"red": False, "green": False}
+        self.current_servo_state = {"pin": 18, "angle": 0, "wiper_state": "IDLE_0"}
+        self.last_dirt_percentage: float = 0.0
 
         self.lock = threading.Lock()
         self.session = requests.Session()
@@ -119,14 +121,21 @@ class ESP32Controller:
                         "red": bool(data.get("red_led", 0)),
                         "green": bool(data.get("green_led", 0))
                     }
+                    if "servo_angle" in data:
+                        self.current_servo_state["angle"] = int(data["servo_angle"])
+                    if "wiper_state" in data:
+                        self.current_servo_state["wiper_state"] = str(data["wiper_state"])
+                    if "dirt_percentage" in data:
+                        self.last_dirt_percentage = float(data["dirt_percentage"])
                 return data
         except Exception as e:
             self._handle_disconnect(str(e))
         return None
 
-    def send_dust_alert(self, force: bool = False) -> Tuple[bool, str]:
+    def send_dust_alert(self, force: bool = False, dirt_percentage: Optional[float] = None) -> Tuple[bool, str]:
         """
         Sends ON command to ESP32: Turn RED LED ON, GREEN LED OFF.
+        Passes dirt percentage to trigger servo wipe on GPIO 18 if >= 70%.
         Avoids redundant HTTP calls if already in DUSTY state unless force=True.
         """
         with self.lock:
@@ -134,6 +143,9 @@ class ESP32Controller:
                 return True, "State already DUSTY (skipped redundant command)"
 
         url = f"{self.base_url}/led/on"
+        if dirt_percentage is not None:
+            url += f"?dirt={round(float(dirt_percentage), 1)}"
+
         for attempt in range(1, self.max_retries + 1):
             try:
                 resp = self.session.post(url, timeout=self.timeout)
@@ -142,9 +154,14 @@ class ESP32Controller:
                         self.is_connected = True
                         self.last_commanded_state = "DUSTY"
                         self.current_led_states = {"red": True, "green": False}
+                        if dirt_percentage is not None:
+                            self.last_dirt_percentage = float(dirt_percentage)
+                            if self.last_dirt_percentage >= 70.0:
+                                self.current_servo_state["angle"] = 180
+                                self.current_servo_state["wiper_state"] = "HOLDING_180"
                         self.last_error = None
-                    logger.info("Sent DUST ALERT to ESP32: RED ON, GREEN OFF.")
-                    Database.log_system_event("INFO", "ESP32", "Dust alert sent: RED ON, GREEN OFF")
+                    logger.info(f"Sent DUST ALERT to ESP32 (dirt: {dirt_percentage}%): RED ON, GREEN OFF.")
+                    Database.log_system_event("INFO", "ESP32", f"Dust alert sent (dirt: {dirt_percentage}%): RED ON")
                     return True, "RED LED ON, GREEN LED OFF"
             except Exception as e:
                 logger.warning(f"Attempt {attempt}/{self.max_retries} failed sending dust alert to ESP32: {e}")
@@ -153,9 +170,9 @@ class ESP32Controller:
         self._handle_disconnect("Failed to send dust alert after retries.")
         return False, "ESP32 unreachable"
 
-    def send_clean_status(self, force: bool = False) -> Tuple[bool, str]:
+    def send_clean_status(self, force: bool = False, dirt_percentage: Optional[float] = None) -> Tuple[bool, str]:
         """
-        Sends OFF command to ESP32: Turn GREEN LED ON, RED LED OFF.
+        Sends OFF command to ESP32: Turn GREEN LED ON, RED LED OFF, Servo stays at 0%.
         Avoids redundant HTTP calls if already in CLEAN state unless force=True.
         """
         with self.lock:
@@ -163,6 +180,9 @@ class ESP32Controller:
                 return True, "State already CLEAN (skipped redundant command)"
 
         url = f"{self.base_url}/led/off"
+        if dirt_percentage is not None:
+            url += f"?dirt={round(float(dirt_percentage), 1)}"
+
         for attempt in range(1, self.max_retries + 1):
             try:
                 resp = self.session.post(url, timeout=self.timeout)
@@ -171,9 +191,12 @@ class ESP32Controller:
                         self.is_connected = True
                         self.last_commanded_state = "CLEAN"
                         self.current_led_states = {"red": False, "green": True}
+                        self.current_servo_state["angle"] = 0
+                        self.current_servo_state["wiper_state"] = "IDLE_0"
+                        self.last_dirt_percentage = float(dirt_percentage or 0.0)
                         self.last_error = None
-                    logger.info("Sent CLEAN STATUS to ESP32: GREEN ON, RED OFF.")
-                    Database.log_system_event("INFO", "ESP32", "Clean status sent: GREEN ON, RED OFF")
+                    logger.info(f"Sent CLEAN STATUS to ESP32 (dirt: {dirt_percentage}%): GREEN ON, RED OFF, SERVO AT 0.")
+                    Database.log_system_event("INFO", "ESP32", f"Clean status sent (dirt: {dirt_percentage}%): GREEN ON")
                     return True, "GREEN LED ON, RED LED OFF"
             except Exception as e:
                 logger.warning(f"Attempt {attempt}/{self.max_retries} failed sending clean status to ESP32: {e}")
@@ -181,6 +204,35 @@ class ESP32Controller:
 
         self._handle_disconnect("Failed to send clean status after retries.")
         return False, "ESP32 unreachable"
+
+    def manual_test_servo(self, angle: Optional[int] = None, action: Optional[str] = None) -> Tuple[bool, str]:
+        """
+        Manually commands the servo on GPIO 18 (e.g. angle=0..180 or action='wipe').
+        """
+        url = f"{self.base_url}/servo"
+        payload: Dict[str, Any] = {}
+        if angle is not None:
+            payload["angle"] = int(angle)
+        if action:
+            payload["action"] = str(action)
+        try:
+            resp = self.session.post(url, json=payload, timeout=self.timeout)
+            if resp.status_code == 200:
+                with self.lock:
+                    self.is_connected = True
+                    if angle is not None:
+                        self.current_servo_state["angle"] = int(angle)
+                        self.current_servo_state["wiper_state"] = "IDLE_0" if angle == 0 else "MANUAL"
+                    elif action == "wipe":
+                        self.current_servo_state["angle"] = 180
+                        self.current_servo_state["wiper_state"] = "HOLDING_180"
+                msg = f"Manual servo test successful: {payload}"
+                logger.info(msg)
+                return True, msg
+            return False, f"ESP32 returned error: {resp.text}"
+        except Exception as e:
+            self._handle_disconnect(str(e))
+            return False, f"Failed to test servo: {str(e)}"
 
     def manual_test_led(self, led_type: str, state: bool) -> Tuple[bool, str]:
         """
@@ -212,7 +264,7 @@ class ESP32Controller:
             return False, f"Failed to test LED: {str(e)}"
 
     def get_status(self) -> Dict[str, Any]:
-        """Returns comprehensive ESP32 connectivity and pin telemetry."""
+        """Returns comprehensive ESP32 connectivity, pin, and servo telemetry."""
         with self.lock:
             return {
                 "ip": self.ip,
@@ -222,6 +274,8 @@ class ESP32Controller:
                 "latency_ms": self.last_ping_latency_ms,
                 "last_commanded_state": self.last_commanded_state,
                 "current_leds": self.current_led_states,
+                "servo": self.current_servo_state,
+                "dirt_percentage": self.last_dirt_percentage,
                 "error": self.last_error
             }
 

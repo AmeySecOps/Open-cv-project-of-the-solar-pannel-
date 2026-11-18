@@ -41,6 +41,7 @@ class MonitoringService:
 
         # Periodic health check timing
         self.last_esp_check_time = 0.0
+        self.last_sent_servo_state: Optional[str] = None
 
     def start_monitoring(self) -> bool:
         """Starts automated continuous monitoring thread."""
@@ -126,11 +127,23 @@ class MonitoringService:
                 # 3. Synchronize with ESP32 Hardware (if in auto mode)
                 if self.auto_mode:
                     if self.debounced_state == "DUSTY":
-                        success, resp = esp32_controller.send_dust_alert()
-                        command_sent = "ALERT_ON (RED)" if success else "ALERT_FAILED"
+                        success, resp = esp32_controller.send_dust_alert(force=True, dirt_percentage=soiling)
+                        command_sent = f"ALERT_ON (RED, {soiling:.1f}%)" if success else "ALERT_FAILED"
                     else:
-                        success, resp = esp32_controller.send_clean_status()
-                        command_sent = "CLEAN_OFF (GREEN)" if success else "CLEAN_FAILED"
+                        success, resp = esp32_controller.send_clean_status(force=True, dirt_percentage=soiling)
+                        command_sent = f"CLEAN_OFF (GREEN, {soiling:.1f}%)" if success else "CLEAN_FAILED"
+
+            # In addition, check for servo threshold transition at 70.0%
+            if self.auto_mode:
+                servo_condition = "WIPING" if soiling >= 70.0 else "IDLE"
+                if servo_condition != self.last_sent_servo_state:
+                    self.last_sent_servo_state = servo_condition
+                    if servo_condition == "WIPING":
+                        logger.info(f"Dirt level {soiling:.1f}% >= 70.0%: Triggering ESP32 servo wiper on GPIO 18.")
+                        esp32_controller.send_dust_alert(force=True, dirt_percentage=soiling)
+                        command_sent = f"SERVO_WIPER_ON ({soiling:.1f}%)"
+                    elif self.debounced_state != "DUSTY":
+                        esp32_controller.send_clean_status(force=True, dirt_percentage=soiling)
 
         # 4. Draw HUD Overlay onto live stream
         annotated = draw_hud_overlay(

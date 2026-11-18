@@ -526,6 +526,24 @@ def test_esp32_led():
     })
 
 
+@app.route("/api/esp32/test-servo", methods=["POST"])
+def test_esp32_servo():
+    """Manually commands Servo Motor on ESP32 GPIO 18 (angle 0..180 or action='wipe')."""
+    data = request.get_json(silent=True) or {}
+    angle = data.get("angle")
+    action = data.get("action")
+
+    if angle is None and not action:
+        return jsonify({"success": False, "error": "Validation error: angle or action parameter is required."}), 400
+
+    success, msg = esp32_controller.manual_test_servo(angle=angle, action=action)
+    return jsonify({
+        "success": success,
+        "message": msg,
+        "esp32": esp32_controller.get_status()
+    })
+
+
 # ---------------------------------------------------------
 # Settings & Calibration APIs
 # ---------------------------------------------------------

@@ -5,6 +5,7 @@ and request validation error handling.
 """
 
 import unittest
+from unittest.mock import patch
 from backend.app import app
 
 
@@ -111,6 +112,24 @@ class TestAPIEndpoints(unittest.TestCase):
         data = response.get_json()
         self.assertTrue(data["success"])
         self.assertIsInstance(data["logs"], list)
+
+    def test_test_servo_missing_params_returns_400(self):
+        """POST /api/esp32/test-servo without angle or action returns 400."""
+        response = self.client.post("/api/esp32/test-servo", json={})
+        self.assertEqual(response.status_code, 400)
+        data = response.get_json()
+        self.assertFalse(data["success"])
+        self.assertIn("Validation error", data["error"])
+
+    @patch("backend.esp32_controller.esp32_controller.manual_test_servo")
+    def test_test_servo_success(self, mock_servo):
+        """POST /api/esp32/test-servo triggers manual_test_servo."""
+        mock_servo.return_value = (True, "Manual servo test successful")
+        response = self.client.post("/api/esp32/test-servo", json={"angle": 180})
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data["success"])
+        mock_servo.assert_called_with(angle=180, action=None)
 
 
 if __name__ == "__main__":

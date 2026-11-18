@@ -87,6 +87,50 @@ class TestESP32Controller(unittest.TestCase):
         self.assertTrue(self.controller.current_led_states["green"])
         mock_post.assert_called_with("http://192.168.1.150:80/led/off", timeout=self.controller.timeout)
 
+    @patch("requests.Session.post")
+    def test_send_dust_alert_above_70_triggers_servo(self, mock_post):
+        """Tests sending dust alert with dirt >= 70% includes dirt parameter and marks servo wiping."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_post.return_value = mock_resp
+
+        success, msg = self.controller.send_dust_alert(force=True, dirt_percentage=78.5)
+        self.assertTrue(success)
+        self.assertEqual(self.controller.last_dirt_percentage, 78.5)
+        self.assertEqual(self.controller.current_servo_state["angle"], 180)
+        self.assertEqual(self.controller.current_servo_state["wiper_state"], "HOLDING_180")
+        mock_post.assert_called_with("http://192.168.1.150:80/led/on?dirt=78.5", timeout=self.controller.timeout)
+
+    @patch("requests.Session.post")
+    def test_send_clean_status_resets_servo_to_zero(self, mock_post):
+        """Tests sending clean status with dirt < 70% resets servo to 0 degrees."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_post.return_value = mock_resp
+
+        # Trigger wiping first
+        self.controller.current_servo_state["angle"] = 180
+        self.controller.current_servo_state["wiper_state"] = "HOLDING_180"
+
+        success, msg = self.controller.send_clean_status(force=True, dirt_percentage=15.0)
+        self.assertTrue(success)
+        self.assertEqual(self.controller.last_dirt_percentage, 15.0)
+        self.assertEqual(self.controller.current_servo_state["angle"], 0)
+        self.assertEqual(self.controller.current_servo_state["wiper_state"], "IDLE_0")
+        mock_post.assert_called_with("http://192.168.1.150:80/led/off?dirt=15.0", timeout=self.controller.timeout)
+
+    @patch("requests.Session.post")
+    def test_manual_servo_command(self, mock_post):
+        """Tests manual servo test command sends POST to /servo."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_post.return_value = mock_resp
+
+        success, msg = self.controller.manual_test_servo(angle=180)
+        self.assertTrue(success)
+        self.assertEqual(self.controller.current_servo_state["angle"], 180)
+        mock_post.assert_called_with("http://192.168.1.150:80/servo", json={"angle": 180}, timeout=self.controller.timeout)
+
 
 if __name__ == "__main__":
     unittest.main()
